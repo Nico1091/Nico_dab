@@ -1,5 +1,10 @@
 # agent-data-toolkit (x402 + DeepSeek)
 
+**Autor y creador original: Nicolás Ángel Rojas Yáñez © 2026.**
+Distribuido bajo licencia MIT: todo uso o copia de este software debe conservar
+el aviso de copyright del autor (ver [LICENSE](LICENSE)). Eliminar la atribución
+constituye una violación de la licencia.
+
 API de pago por llamada para agentes de IA. Cobra USDC en Base vía protocolo x402.
 Categoría "data": la de mayor demanda del ecosistema x402 (~31% de la actividad).
 
