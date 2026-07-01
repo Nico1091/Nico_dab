@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+x402<2
+json-repair
+jsonschema
+openai
+python-dotenv
+markdownify
