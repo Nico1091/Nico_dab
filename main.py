@@ -11,6 +11,9 @@ Config por variables de entorno (.env soportado):
   PAY_TO            — dirección pública de tu wallet en Base (0x...), obligatoria en producción
   NETWORK           — "base" (mainnet) o "base-sepolia" (pruebas)
   DEEPSEEK_API_KEY  — clave de https://platform.deepseek.com (para /extract)
+  CDP_API_KEY_ID / CDP_API_KEY_SECRET — claves del portal CDP de Coinbase; con ellas
+                      se usa el facilitador de Coinbase y el servicio aparece en el
+                      Bazaar x402 (sin ellas, facilitador genérico: cobra pero no lista)
 """
 import csv
 import io
@@ -53,10 +56,35 @@ app = FastAPI(
 if PAY_TO:
     from x402.fastapi.middleware import require_payment
 
+    # Con claves CDP se usa el facilitador de Coinbase (lista el servicio en el
+    # Bazaar x402); sin ellas, el facilitador genérico (cobra pero no lista).
+    facilitator = None
+    if os.getenv("CDP_API_KEY_ID") and os.getenv("CDP_API_KEY_SECRET"):
+        from cdp.x402 import create_facilitator_config
+
+        facilitator = create_facilitator_config(
+            os.getenv("CDP_API_KEY_ID"), os.getenv("CDP_API_KEY_SECRET")
+        )
+
+    DESCRIPTIONS = {
+        "/repair": "Repair malformed JSON (truncated, single quotes, trailing "
+                   "commas, LLM output artifacts) into valid JSON.",
+        "/validate": "Validate JSON data against a JSON Schema and return a "
+                     "detailed list of violations.",
+        "/csv": "Convert a list of JSON records into CSV with automatic "
+                "header detection.",
+        "/markdown": "Convert raw HTML into clean Markdown (scripts and "
+                     "styles stripped).",
+        "/extract": "Extract structured JSON matching a given schema from "
+                    "free-form text using an LLM worker.",
+    }
+
     for path, price in PRICES.items():
         app.middleware("http")(
             require_payment(path=path, price=price,
-                            pay_to_address=PAY_TO, network=NETWORK)
+                            pay_to_address=PAY_TO, network=NETWORK,
+                            description=DESCRIPTIONS[path],
+                            facilitator_config=facilitator)
         )
 
 
