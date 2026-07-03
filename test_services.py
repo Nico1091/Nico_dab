@@ -33,6 +33,15 @@ CASES = [
      "precio_unitario_usd", "ciudad"]}}, 200,
      lambda r: r["ok"] and r["data"]["cantidad"] == 3 and r.get("schema_valid") is True),
     ("/repair", "payload gigante", {"broken": "{x: 1}" + " " * 250000}, 413, None),
+    ("/promote", "feliz (DeepSeek)", {"name": "demo-csv-api", "url": "https://example.com",
+     "what_it_does": "convierte JSON a CSV por $0.001 la llamada", "language": "es"}, 200,
+     lambda r: r["ok"] and all(k in r["kit"] for k in
+     ("tagline", "bazaar_description", "tweet", "readme_blurb", "one_liner"))),
+    ("/promote", "faltan campos", {"name": "x"}, 422, None),
+    ("GET /", "escaparate", None, 200,
+     lambda r: "/promote" in r["endpoints"] and r["tagline"]),
+    ("GET /ads", "kit propio", None, 200,
+     lambda r: r["ok"] and "#x402" in r["kit"]["tweet"]),
 ]
 
 results = []
@@ -40,7 +49,10 @@ with httpx.Client(timeout=60) as c:
     for path, name, payload, want_status, check in CASES:
         t0 = time.perf_counter()
         try:
-            resp = c.post(BASE + path, json=payload)
+            if path.startswith("GET "):
+                resp = c.get(BASE + path[4:])
+            else:
+                resp = c.post(BASE + path, json=payload)
             ms = (time.perf_counter() - t0) * 1000
             ok = resp.status_code == want_status
             detail = ""

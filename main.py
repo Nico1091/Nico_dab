@@ -6,6 +6,11 @@ Endpoints de pago (categoría "data", la de mayor demanda del ecosistema x402):
   POST /csv       $0.001  convierte una lista de registros JSON a CSV
   POST /markdown  $0.002  convierte HTML a Markdown limpio
   POST /extract   $0.005  extrae JSON estructurado de texto libre (trabajador: DeepSeek)
+  POST /promote   $0.005  kit publicitario x402 para el servicio del cliente (DeepSeek)
+
+Endpoints gratis: GET / y GET /ads — escaparate con autopromoción que DeepSeek
+regenera cada PROMO_INTERVAL_HOURS horas (24 por defecto; el propio /promote
+aplicado a este servicio) — y GET /health.
 
 Config por variables de entorno (.env soportado):
   PAY_TO            — dirección pública de tu wallet en Base (0x...), obligatoria en producción
@@ -19,6 +24,8 @@ import csv
 import io
 import json
 import os
+import threading
+import time
 
 from dotenv import load_dotenv
 
@@ -43,6 +50,23 @@ PRICES = {
     "/csv": os.getenv("PRICE_CSV", "$0.001"),
     "/markdown": os.getenv("PRICE_MARKDOWN", "$0.002"),
     "/extract": os.getenv("PRICE_EXTRACT", "$0.005"),
+    "/promote": os.getenv("PRICE_PROMOTE", "$0.005"),
+}
+
+DESCRIPTIONS = {
+    "/repair": "Repair malformed JSON (truncated, single quotes, trailing "
+               "commas, LLM output artifacts) into valid JSON.",
+    "/validate": "Validate JSON data against a JSON Schema and return a "
+                 "detailed list of violations.",
+    "/csv": "Convert a list of JSON records into CSV with automatic "
+            "header detection.",
+    "/markdown": "Convert raw HTML into clean Markdown (scripts and "
+                 "styles stripped).",
+    "/extract": "Extract structured JSON matching a given schema from "
+                "free-form text using an LLM worker.",
+    "/promote": "Generate a truthful promotion kit for your x402 service "
+                "(tagline, discovery-optimized description, tweet, README "
+                "blurb) using an LLM copywriter.",
 }
 
 app = FastAPI(
@@ -72,19 +96,6 @@ if PAY_TO:
             return _sync_headers()
 
         facilitator = {"url": _cdp["url"], "create_headers": _create_headers}
-
-    DESCRIPTIONS = {
-        "/repair": "Repair malformed JSON (truncated, single quotes, trailing "
-                   "commas, LLM output artifacts) into valid JSON.",
-        "/validate": "Validate JSON data against a JSON Schema and return a "
-                     "detailed list of violations.",
-        "/csv": "Convert a list of JSON records into CSV with automatic "
-                "header detection.",
-        "/markdown": "Convert raw HTML into clean Markdown (scripts and "
-                     "styles stripped).",
-        "/extract": "Extract structured JSON matching a given schema from "
-                    "free-form text using an LLM worker.",
-    }
 
     for path, price in PRICES.items():
         app.middleware("http")(
@@ -228,6 +239,136 @@ def extract(req: ExtractRequest):
     except Exception:
         raise HTTPException(502, "el proveedor del modelo no respondió")
     return _validate_against(data, req.schema_, {"ok": True, "data": data})
+
+
+# -------------------------------------------------------------------------- promote
+class PromoteRequest(BaseModel):
+    name: str
+    url: str
+    what_it_does: str
+    pricing: str | None = None
+    audience: str | None = None
+    language: str = "en"
+
+
+@app.post("/promote")
+def promote(req: PromoteRequest):
+    brain = get_brain()
+    if brain is None:
+        raise HTTPException(503, "DEEPSEEK_API_KEY no configurada")
+    _check_size(req.what_it_does)
+    try:
+        kit = brain.run("promote", json.dumps(req.model_dump(exclude_none=True)),
+                        instructions=f"Write the kit in this language: {req.language}")
+    except ValueError as e:
+        raise HTTPException(502, str(e))
+    except Exception:
+        raise HTTPException(502, "el proveedor del modelo no respondió")
+    return {"ok": True, "kit": kit}
+
+
+# ----------------------------------------------------------------- escaparate (gratis)
+# Autopromoción agéntica: DeepSeek regenera el kit publicitario del propio
+# servicio como máximo una vez cada PROMO_INTERVAL_HOURS (dogfooding de /promote,
+# ~1 llamada corta al día — coste despreciable). Se sirve en GET / y GET /ads.
+PROMO_INTERVAL_HOURS = float(os.getenv("PROMO_INTERVAL_HOURS", "24"))
+_PROMO_RETRY_SECONDS = 3600  # tras un intento fallido, esperar antes de reintentar
+
+BASE_URL = os.getenv("PUBLIC_URL", "https://agent-data-toolkit.onrender.com")
+
+_SELF_SERVICE = {
+    "name": "agent-data-toolkit",
+    "url": BASE_URL,
+    "what_it_does": "; ".join(f"POST {p} ({PRICES[p]}): {DESCRIPTIONS[p]}"
+                              for p in PRICES),
+    "pricing": "pay-per-call in USDC on Base via the x402 protocol, from $0.001",
+    "audience": "AI agents with x402 wallets and the developers who run them",
+    "related_services": [
+        {"name": "x402-trust-guard",
+         "url": "https://nico222222222-x402-trust-guard.hf.space"}
+    ],
+}
+
+_FALLBACK_KIT = {
+    "tagline": "Clean data for AI agents, one cent at a time.",
+    "bazaar_description": "Pay-per-call data utilities for AI agents: repair "
+        "JSON, validate schemas, JSON-to-CSV, HTML-to-Markdown, LLM extraction "
+        "and promo-kit generation. USDC on Base via x402, from $0.001.",
+    "tweet": "agent-data-toolkit: six pay-per-call data endpoints for AI agents "
+        "(JSON repair, schema validation, CSV, Markdown, extraction, promo kits). "
+        f"USDC on Base, from $0.001. {BASE_URL} #x402",
+    "readme_blurb": "Pay-per-call data utilities for AI agents, billed in USDC "
+        "on Base via x402. Six endpoints from $0.001: JSON repair, schema "
+        "validation, CSV, Markdown, LLM extraction and promo-kit generation.",
+    "one_liner": "An x402 API that fixes, validates, converts and extracts "
+        "data for about a tenth of a cent per call.",
+}
+
+_promo = {"kit": None, "generated_at": None, "worker": "static"}
+_promo_lock = threading.Lock()
+_promo_last_attempt = 0.0
+
+
+def _refresh_promo() -> None:
+    """Regenera la autopromoción con DeepSeek."""
+    global _promo_last_attempt
+    _promo_last_attempt = time.time()
+    brain = get_brain()
+    if brain is None:
+        return
+    try:
+        kit = brain.run("promote", json.dumps(_SELF_SERVICE))
+        if all(k in kit for k in _FALLBACK_KIT):
+            _promo.update(kit=kit, generated_at=time.time(), worker="deepseek")
+    except Exception:
+        pass  # el escaparate nunca debe caerse por un fallo del LLM
+
+
+def _promo_kit() -> dict:
+    """Kit vigente; si caducó, dispara un refresco en segundo plano."""
+    now = time.time()
+    stale = (_promo["generated_at"] is None
+             or now - _promo["generated_at"] > PROMO_INTERVAL_HOURS * 3600)
+    if (stale and now - _promo_last_attempt > _PROMO_RETRY_SECONDS
+            and _promo_lock.acquire(blocking=False)):
+        def _job():
+            try:
+                _refresh_promo()
+            finally:
+                _promo_lock.release()
+        threading.Thread(target=_job, daemon=True).start()
+    return _promo["kit"] or _FALLBACK_KIT
+
+
+@app.get("/")
+def home():
+    kit = _promo_kit()
+    return {
+        "service": "agent-data-toolkit",
+        "tagline": kit.get("tagline"),
+        "endpoints": {p: {"price": PRICES[p], "description": DESCRIPTIONS[p]}
+                      for p in PRICES},
+        "free": {"GET /": "this page", "GET /ads": "full promo kit",
+                 "GET /health": "service status", "GET /docs": "Swagger UI"},
+        "payment": {"protocol": "x402", "currency": "USDC", "network": NETWORK},
+        "more_services": _SELF_SERVICE["related_services"],
+        "note": "The promo copy on this page is regenerated periodically by "
+                "POST /promote — the product advertising itself.",
+    }
+
+
+@app.get("/ads")
+def ads():
+    kit = _promo_kit()
+    return {
+        "ok": True,
+        "kit": kit,
+        "worker": _promo["worker"],
+        "generated_at": _promo["generated_at"],
+        "refresh_interval_hours": PROMO_INTERVAL_HOURS,
+        "made_with": "POST /promote — buy this same copywriting for your own "
+                     f"service ({PRICES['/promote']})",
+    }
 
 
 # --------------------------------------------------------------------------- health

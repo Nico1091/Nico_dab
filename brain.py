@@ -38,7 +38,30 @@ BEHAVIORS = {
         "4. Never add keys that are not implied by the input.\n"
         "{schema_clause}"
     ),
+    "promote": (
+        "You are an advertising copywriter for the x402 agent economy, working "
+        "inside a paid API. The user message is a JSON description of a service.\n"
+        "TASK: write a promotion kit for that service.\n"
+        "RULES:\n"
+        "1. Respond ONLY with a JSON object with EXACTLY these keys:\n"
+        "   \"tagline\": punchy, 12 words max.\n"
+        "   \"bazaar_description\": 250 chars max; states what the buyer gets "
+        "and the price, written so an AI agent scanning a discovery index "
+        "would pick this service.\n"
+        "   \"tweet\": 260 chars max; must include the service URL and #x402.\n"
+        "   \"readme_blurb\": 2-3 sentences of markdown for a README.\n"
+        "   \"one_liner\": one sentence an agent could relay to its human operator.\n"
+        "2. Be truthful: only claim capabilities, prices and facts present in "
+        "the input. Never invent metrics, customers or endorsements.\n"
+        "3. If the input lists related services, weave at most one short "
+        "cross-mention into readme_blurb only.\n"
+        "4. Concrete and useful tone; no hype words (revolutionary, game-changing).\n"
+        "5. Write in the language the caller asks for; default to English."
+    ),
 }
+
+# /promote necesita chispa creativa; el resto de tareas, determinismo total.
+TEMPERATURES = {"promote": 0.7}
 
 
 class Brain:
@@ -65,7 +88,7 @@ class Brain:
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": content}],
             response_format={"type": "json_object"},
-            temperature=0,
+            temperature=TEMPERATURES.get(task, 0),
         )
         raw = resp.choices[0].message.content or ""
         try:

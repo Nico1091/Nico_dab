@@ -14,6 +14,8 @@ Categoría "data": la de mayor demanda del ecosistema x402 (~31% de la actividad
 - `POST /csv` ($0.001) — lista de registros JSON → CSV. Body: `{"records": [{...}], "delimiter": ","?}`
 - `POST /markdown` ($0.002) — HTML → Markdown limpio (sin scripts). Body: `{"html": "..."}`
 - `POST /extract` ($0.005) — extrae JSON estructurado de texto libre usando DeepSeek. Body: `{"text": "...", "schema_": {...}, "instructions": "..."?}`
+- `POST /promote` ($0.005) — publicidad agéntica: DeepSeek redacta el kit publicitario de TU servicio x402 (tagline, descripción optimizada para índices de discovery, tweet con #x402, blurb de README). Body: `{"name": "...", "url": "...", "what_it_does": "...", "pricing": "..."?, "audience": "..."?, "language": "es"?}`
+- `GET /` y `GET /ads` — gratis, escaparate del servicio con autopromoción regenerada por DeepSeek cada `PROMO_INTERVAL_HOURS` horas (24 por defecto): el propio `/promote` aplicado a este servicio, como demo de su calidad.
 - `GET /health` — gratis, estado del servicio.
 
 Límite de entrada: 200k caracteres (HTTP 413 si se supera). Llamadas a DeepSeek con timeout 60s y 2 reintentos.
@@ -24,7 +26,9 @@ Límite de entrada: 200k caracteres (HTTP 413 si se supera). Llamadas a DeepSeek
 | `PAY_TO` | tu wallet en Base (0x...) — sin ella corre en modo gratis |
 | `DEEPSEEK_API_KEY` | clave de platform.deepseek.com |
 | `NETWORK` | `base` (producción) o `base-sepolia` (pruebas) |
-| `PRICE_REPAIR` / `PRICE_EXTRACT` | precios, ej. `$0.001` |
+| `PRICE_REPAIR` / `PRICE_EXTRACT` / `PRICE_PROMOTE` | precios, ej. `$0.001` |
+| `PROMO_INTERVAL_HOURS` | cada cuántas horas DeepSeek regenera la autopromoción (24 por defecto; ~1 llamada corta al día, coste despreciable) |
+| `PUBLIC_URL` | URL pública del servicio para la autopromoción |
 
 ## Cómo crear la wallet en Base
 1. Instala **Coinbase Wallet** (o MetaMask y añade la red Base, chainid 8453).
