@@ -62,9 +62,16 @@ if PAY_TO:
     if os.getenv("CDP_API_KEY_ID") and os.getenv("CDP_API_KEY_SECRET"):
         from cdp.x402 import create_facilitator_config
 
-        facilitator = create_facilitator_config(
+        _cdp = create_facilitator_config(
             os.getenv("CDP_API_KEY_ID"), os.getenv("CDP_API_KEY_SECRET")
         )
+        # cdp-sdk entrega create_headers síncrona, pero x402<2 la await-ea
+        _sync_headers = _cdp["create_headers"]
+
+        async def _create_headers():
+            return _sync_headers()
+
+        facilitator = {"url": _cdp["url"], "create_headers": _create_headers}
 
     DESCRIPTIONS = {
         "/repair": "Repair malformed JSON (truncated, single quotes, trailing "
