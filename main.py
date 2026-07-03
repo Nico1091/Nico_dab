@@ -6,7 +6,7 @@ Endpoints de pago (categoría "data", la de mayor demanda del ecosistema x402):
   POST /csv       $0.001  convierte una lista de registros JSON a CSV
   POST /markdown  $0.002  convierte HTML a Markdown limpio
   POST /extract   $0.005  extrae JSON estructurado de texto libre (trabajador: DeepSeek)
-  POST /promote   $0.005  kit publicitario x402 para el servicio del cliente (DeepSeek)
+  POST /promote   $0.02   kit publicitario x402 para el servicio del cliente (DeepSeek)
 
 Endpoints gratis: GET / y GET /ads — escaparate con autopromoción que DeepSeek
 regenera cada PROMO_INTERVAL_HOURS horas (24 por defecto; el propio /promote
@@ -50,7 +50,7 @@ PRICES = {
     "/csv": os.getenv("PRICE_CSV", "$0.001"),
     "/markdown": os.getenv("PRICE_MARKDOWN", "$0.002"),
     "/extract": os.getenv("PRICE_EXTRACT", "$0.005"),
-    "/promote": os.getenv("PRICE_PROMOTE", "$0.005"),
+    "/promote": os.getenv("PRICE_PROMOTE", "$0.02"),
 }
 
 DESCRIPTIONS = {

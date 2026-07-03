@@ -14,7 +14,7 @@ Categoría "data": la de mayor demanda del ecosistema x402 (~31% de la actividad
 - `POST /csv` ($0.001) — lista de registros JSON → CSV. Body: `{"records": [{...}], "delimiter": ","?}`
 - `POST /markdown` ($0.002) — HTML → Markdown limpio (sin scripts). Body: `{"html": "..."}`
 - `POST /extract` ($0.005) — extrae JSON estructurado de texto libre usando DeepSeek. Body: `{"text": "...", "schema_": {...}, "instructions": "..."?}`
-- `POST /promote` ($0.005) — publicidad agéntica: DeepSeek redacta el kit publicitario de TU servicio x402 (tagline, descripción optimizada para índices de discovery, tweet con #x402, blurb de README). Body: `{"name": "...", "url": "...", "what_it_does": "...", "pricing": "..."?, "audience": "..."?, "language": "es"?}`
+- `POST /promote` ($0.02) — publicidad agéntica: DeepSeek redacta el kit publicitario de TU servicio x402 (tagline, descripción optimizada para índices de discovery, tweet con #x402, blurb de README). Body: `{"name": "...", "url": "...", "what_it_does": "...", "pricing": "..."?, "audience": "..."?, "language": "es"?}`
 - `GET /` y `GET /ads` — gratis, escaparate del servicio con autopromoción regenerada por DeepSeek cada `PROMO_INTERVAL_HOURS` horas (24 por defecto): el propio `/promote` aplicado a este servicio, como demo de su calidad.
 - `GET /health` — gratis, estado del servicio.
 
