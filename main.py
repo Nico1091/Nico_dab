@@ -420,6 +420,26 @@ def wellknown_x402():
     }
 
 
+# ------------------------------------------------------------------------ self-ping
+# Render free duerme tras ~15 min sin tráfico ENTRANTE. Este hilo pide /health
+# por la URL pública cada SELF_PING_MINUTES para que siempre haya tráfico
+# (las 750 h/mes del free tier alcanzan para estar 24/7 despierto). Solo se
+# activa en Render (env RENDER) o forzando SELF_PING=1; en dev local no corre.
+SELF_PING_MINUTES = float(os.getenv("SELF_PING_MINUTES", "14"))
+
+if os.getenv("RENDER") or os.getenv("SELF_PING") == "1":
+    def _self_ping_loop():
+        import urllib.request
+        while True:
+            time.sleep(SELF_PING_MINUTES * 60)
+            try:
+                urllib.request.urlopen(BASE_URL + "/health", timeout=90)
+            except Exception:
+                pass  # el siguiente intento llega en unos minutos
+
+    threading.Thread(target=_self_ping_loop, daemon=True).start()
+
+
 # --------------------------------------------------------------------------- health
 @app.get("/health")
 def health():

@@ -30,6 +30,7 @@ Límite de entrada: 200k caracteres (HTTP 413 si se supera). Llamadas a DeepSeek
 | `PRICE_REPAIR` / `PRICE_EXTRACT` / `PRICE_PROMOTE` | precios, ej. `$0.001` |
 | `PROMO_INTERVAL_HOURS` | cada cuántas horas DeepSeek regenera la autopromoción (24 por defecto; ~1 llamada corta al día, coste despreciable) |
 | `PUBLIC_URL` | URL pública del servicio para la autopromoción |
+| `SELF_PING_MINUTES` | cada cuántos minutos el servidor se hace ping a sí mismo para que Render free no lo duerma (14 por defecto; solo activo en Render, o con `SELF_PING=1`) |
 
 ## Cómo crear la wallet en Base
 1. Instala **Coinbase Wallet** (o MetaMask y añade la red Base, chainid 8453).
