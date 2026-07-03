@@ -17,6 +17,7 @@ Categoría "data": la de mayor demanda del ecosistema x402 (~31% de la actividad
 - `POST /promote` ($0.02) — publicidad agéntica: DeepSeek redacta el kit publicitario de TU servicio x402 (tagline, descripción optimizada para índices de discovery, tweet con #x402, blurb de README). Body: `{"name": "...", "url": "...", "what_it_does": "...", "pricing": "..."?, "audience": "..."?, "language": "es"?}`
 - `GET /` y `GET /ads` — gratis, escaparate del servicio con autopromoción regenerada por DeepSeek cada `PROMO_INTERVAL_HOURS` horas (24 por defecto): el propio `/promote` aplicado a este servicio, como demo de su calidad.
 - `GET /health` — gratis, estado del servicio.
+- `GET /.well-known/x402` — gratis, manifiesto de discovery: catálogo completo de los recursos de pago (mismo formato `accepts` que los 402) para que crawlers e indexadores x402 listen todo de una sola vez.
 
 Límite de entrada: 200k caracteres (HTTP 413 si se supera). Llamadas a DeepSeek con timeout 60s y 2 reintentos.
 

@@ -371,6 +371,55 @@ def ads():
     }
 
 
+# ------------------------------------------------------- discovery (/.well-known/x402)
+# Manifiesto de discovery x402 (convención well-known, RFC 8615): los crawlers
+# lo piden para indexar TODOS los recursos de pago de una vez, sin sondear
+# endpoint por endpoint. Mismo formato "accepts" que emiten nuestros 402.
+_USDC_BY_NETWORK = {
+    "base": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "base-sepolia": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+}
+
+
+def _atomic(price: str) -> str:
+    from decimal import Decimal
+    return str(int(Decimal(price.lstrip("$")) * 1_000_000))
+
+
+@app.get("/.well-known/x402")
+def wellknown_x402():
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    resources = []
+    if PAY_TO:
+        for path in PRICES:
+            resources.append({
+                "resource": BASE_URL + path,
+                "type": "http",
+                "x402Version": 1,
+                "accepts": [{
+                    "scheme": "exact",
+                    "network": NETWORK,
+                    "maxAmountRequired": _atomic(PRICES[path]),
+                    "resource": BASE_URL + path,
+                    "description": DESCRIPTIONS[path],
+                    "mimeType": "application/json",
+                    "payTo": PAY_TO,
+                    "maxTimeoutSeconds": 60,
+                    "asset": _USDC_BY_NETWORK.get(NETWORK, ""),
+                    "extra": {"name": "USD Coin", "version": "2"},
+                }],
+                "lastUpdated": now,
+                "metadata": {"input": {"type": "http", "method": "POST",
+                                       "discoverable": True}},
+            })
+    return {
+        "x402Version": 1,
+        "serviceName": "agent-data-toolkit",
+        "resources": resources,
+    }
+
+
 # --------------------------------------------------------------------------- health
 @app.get("/health")
 def health():

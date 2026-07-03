@@ -42,6 +42,8 @@ CASES = [
      lambda r: "/promote" in r["endpoints"] and r["tagline"]),
     ("GET /ads", "kit propio", None, 200,
      lambda r: r["ok"] and "#x402" in r["kit"]["tweet"]),
+    ("GET /.well-known/x402", "manifiesto discovery", None, 200,
+     lambda r: r["serviceName"] == "agent-data-toolkit" and isinstance(r["resources"], list)),
 ]
 
 results = []
