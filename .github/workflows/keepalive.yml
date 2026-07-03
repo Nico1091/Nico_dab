@@ -1,0 +1,20 @@
+# Mantiene despierto el free tier de Render (duerme tras ~15 min sin tráfico):
+# ping a /health cada 14 minutos. GitHub puede retrasar unos minutos el cron;
+# si el servicio llegó a dormirse, el propio ping lo despierta (cold start).
+name: keepalive
+
+on:
+  schedule:
+    - cron: "*/14 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ping /health
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
+            https://agent-data-toolkit.onrender.com/health)
+          echo "GET /health -> $code"
+          test "$code" = "200"
