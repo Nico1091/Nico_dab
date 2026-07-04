@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from json_repair import repair_json
 from markdownify import markdownify
 import jsonschema
@@ -124,8 +124,11 @@ def _validate_against(data, schema: dict | None, result: dict) -> dict:
 
 # --------------------------------------------------------------------------- repair
 class RepairRequest(BaseModel):
+    # El campo se llama schema_ porque "schema" choca con un atributo de
+    # BaseModel; el alias acepta ambos nombres en el JSON de entrada.
+    model_config = ConfigDict(populate_by_name=True)
     broken: str
-    schema_: dict | None = None
+    schema_: dict | None = Field(None, alias="schema")
 
 
 def _repair_is_dubious(fixed) -> bool:
@@ -166,8 +169,9 @@ def repair(req: RepairRequest):
 
 # ------------------------------------------------------------------------- validate
 class ValidateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     data: dict | list
-    schema_: dict
+    schema_: dict = Field(alias="schema")
 
 
 @app.post("/validate")
@@ -221,8 +225,9 @@ def to_markdown(req: MarkdownRequest):
 
 # -------------------------------------------------------------------------- extract
 class ExtractRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     text: str
-    schema_: dict
+    schema_: dict = Field(alias="schema")
     instructions: str | None = None
 
 

@@ -16,6 +16,8 @@ CASES = [
      "properties": {"n": {"type": "string"}}}}, 200, lambda r: r["schema_valid"] is False),
     ("/validate", "valido", {"data": {"a": 1}, "schema_": {"type": "object",
      "properties": {"a": {"type": "integer"}}}}, 200, lambda r: r["valid"] is True),
+    ("/validate", "alias schema", {"data": {"a": 1}, "schema": {"type": "object",
+     "properties": {"a": {"type": "integer"}}}}, 200, lambda r: r["valid"] is True),
     ("/validate", "invalido", {"data": {"a": "x"}, "schema_": {"type": "object",
      "properties": {"a": {"type": "integer"}}}}, 200,
      lambda r: r["valid"] is False and r["errors"]),
