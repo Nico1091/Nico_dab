@@ -58,10 +58,22 @@ BEHAVIORS = {
         "4. Concrete and useful tone; no hype words (revolutionary, game-changing).\n"
         "5. Write in the language the caller asks for; default to English."
     ),
+    "ask": (
+        "You are a helpful general-purpose worker inside a paid API for AI "
+        "agents and developers.\n"
+        "TASK: answer the caller's request (question, rewrite, summary, "
+        "classification, brainstorm...).\n"
+        "RULES:\n"
+        "1. Respond ONLY with a JSON object: {{\"answer\": ...}}. The value is a "
+        "string, or a JSON structure if the caller explicitly asks for "
+        "structured output.\n"
+        "2. Be truthful and concise; if you do not know, say so in the answer.\n"
+        "3. Answer in the same language as the request unless told otherwise."
+    ),
 }
 
-# /promote necesita chispa creativa; el resto de tareas, determinismo total.
-TEMPERATURES = {"promote": 0.7}
+# /promote necesita chispa creativa, /ask algo de naturalidad; el resto, determinismo.
+TEMPERATURES = {"promote": 0.7, "ask": 0.3}
 
 
 class Brain:
@@ -74,7 +86,7 @@ class Brain:
                              timeout=60, max_retries=2)
 
     def run(self, task: str, content: str, schema: dict | None = None,
-            instructions: str | None = None) -> dict:
+            instructions: str | None = None, max_tokens: int | None = None) -> dict:
         """Ejecuta una tarea y devuelve el JSON parseado. Lanza ValueError si falla."""
         system = BEHAVIORS[task].format(
             schema=json.dumps(schema) if schema else "{}",
@@ -83,12 +95,14 @@ class Brain:
         )
         if instructions:
             system += "\nAdditional instructions from the caller: " + instructions
+        kwargs = {"max_tokens": max_tokens} if max_tokens else {}
         resp = self.client.chat.completions.create(
             model="deepseek-chat",
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": content}],
             response_format={"type": "json_object"},
             temperature=TEMPERATURES.get(task, 0),
+            **kwargs,
         )
         raw = resp.choices[0].message.content or ""
         try:

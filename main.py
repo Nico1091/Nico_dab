@@ -7,6 +7,12 @@ Endpoints de pago (categoría "data", la de mayor demanda del ecosistema x402):
   POST /markdown  $0.002  convierte HTML a Markdown limpio
   POST /extract   $0.005  extrae JSON estructurado de texto libre (trabajador: DeepSeek)
   POST /promote   $0.02   kit publicitario x402 para el servicio del cliente (DeepSeek)
+  POST /ask       $0.004  respuesta LLM de propósito general en JSON (DeepSeek)
+
+Gateway fiat (El Cambista): los mismos endpoints bajo /fiat/*, sin x402 — se
+venden por suscripción en RapidAPI; cada llamada del marketplace trae el header
+X-RapidAPI-Proxy-Secret, que se compara con RAPIDAPI_PROXY_SECRET (sin esa env
+var el gateway queda dormido y responde 503).
 
 Endpoints gratis: GET / y GET /ads — escaparate con autopromoción que DeepSeek
 regenera cada PROMO_INTERVAL_HOURS horas (24 por defecto; el propio /promote
@@ -19,8 +25,11 @@ Config por variables de entorno (.env soportado):
   CDP_API_KEY_ID / CDP_API_KEY_SECRET — claves del portal CDP de Coinbase; con ellas
                       se usa el facilitador de Coinbase y el servicio aparece en el
                       Bazaar x402 (sin ellas, facilitador genérico: cobra pero no lista)
+  RAPIDAPI_PROXY_SECRET — secreto del panel de proveedor de RapidAPI; activa el
+                      gateway fiat /fiat/* (dormido si falta)
 """
 import csv
+import hmac
 import io
 import json
 import os
@@ -31,7 +40,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from json_repair import repair_json
 from markdownify import markdownify
@@ -43,6 +52,9 @@ PAY_TO = os.getenv("PAY_TO", "")
 NETWORK = os.getenv("NETWORK", "base")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "200000"))
+# /ask limita más la entrada para que el coste DeepSeek nunca coma el margen.
+ASK_MAX_CHARS = int(os.getenv("ASK_MAX_CHARS", "16000"))
+RAPIDAPI_PROXY_SECRET = os.getenv("RAPIDAPI_PROXY_SECRET", "")
 
 PRICES = {
     "/repair": os.getenv("PRICE_REPAIR", "$0.001"),
@@ -51,6 +63,7 @@ PRICES = {
     "/markdown": os.getenv("PRICE_MARKDOWN", "$0.002"),
     "/extract": os.getenv("PRICE_EXTRACT", "$0.005"),
     "/promote": os.getenv("PRICE_PROMOTE", "$0.02"),
+    "/ask": os.getenv("PRICE_ASK", "$0.004"),
 }
 
 DESCRIPTIONS = {
@@ -67,6 +80,9 @@ DESCRIPTIONS = {
     "/promote": "Generate a truthful promotion kit for your x402 service "
                 "(tagline, discovery-optimized description, tweet, README "
                 "blurb) using an LLM copywriter.",
+    "/ask": "Ask an LLM worker anything — question answering, rewriting, "
+            "summarizing, classification, brainstorming — and get a JSON "
+            "answer. No account or API key needed, pay per call.",
 }
 
 app = FastAPI(
@@ -272,6 +288,50 @@ def promote(req: PromoteRequest):
     return {"ok": True, "kit": kit}
 
 
+# ------------------------------------------------------------------------------ ask
+class AskRequest(BaseModel):
+    prompt: str
+    instructions: str | None = None
+
+
+@app.post("/ask")
+def ask(req: AskRequest):
+    brain = get_brain()
+    if brain is None:
+        raise HTTPException(503, "DEEPSEEK_API_KEY no configurada")
+    if len(req.prompt) + len(req.instructions or "") > ASK_MAX_CHARS:
+        raise HTTPException(413, f"entrada supera {ASK_MAX_CHARS} caracteres")
+    try:
+        out = brain.run("ask", req.prompt, instructions=req.instructions,
+                        max_tokens=1200)
+    except ValueError as e:
+        raise HTTPException(502, str(e))
+    except Exception:
+        raise HTTPException(502, "el proveedor del modelo no respondió")
+    return {"ok": True, "answer": out.get("answer", out), "worker": "deepseek-chat"}
+
+
+# ------------------------------------------------------- gateway fiat (El Cambista)
+# Los mismos servicios vendidos por suscripción a humanos en RapidAPI: el
+# marketplace pone la tarjeta y las cuotas; aquí solo se aceptan llamadas que
+# traigan el secreto que RapidAPI añade a cada request que proxea. Sin
+# RAPIDAPI_PROXY_SECRET el gateway queda dormido (503) y no expone nada.
+def _fiat_auth(request: Request) -> None:
+    if not RAPIDAPI_PROXY_SECRET:
+        raise HTTPException(503, "fiat gateway dormido: falta RAPIDAPI_PROXY_SECRET")
+    got = request.headers.get("X-RapidAPI-Proxy-Secret", "")
+    if not hmac.compare_digest(got, RAPIDAPI_PROXY_SECRET):
+        raise HTTPException(401, "la llamada no viene del gateway de RapidAPI")
+
+
+fiat = APIRouter(prefix="/fiat", dependencies=[Depends(_fiat_auth)])
+for _path, _fn in [("/repair", repair), ("/validate", validate), ("/csv", to_csv),
+                   ("/markdown", to_markdown), ("/extract", extract),
+                   ("/promote", promote), ("/ask", ask)]:
+    fiat.post(_path)(_fn)
+app.include_router(fiat)
+
+
 # ----------------------------------------------------------------- escaparate (gratis)
 # Autopromoción agéntica: DeepSeek regenera el kit publicitario del propio
 # servicio como máximo una vez cada PROMO_INTERVAL_HOURS (dogfooding de /promote,
@@ -356,6 +416,8 @@ def home():
         "free": {"GET /": "this page", "GET /ads": "full promo kit",
                  "GET /health": "service status", "GET /docs": "Swagger UI"},
         "payment": {"protocol": "x402", "currency": "USDC", "network": NETWORK},
+        "fiat_gateway": "same endpoints under /fiat/* via RapidAPI subscription "
+                        "(credit card, no crypto wallet needed)",
         "more_services": _SELF_SERVICE["related_services"],
         "note": "The promo copy on this page is regenerated periodically by "
                 "POST /promote — the product advertising itself.",
@@ -453,5 +515,6 @@ def health():
         "paid": bool(PAY_TO),
         "network": NETWORK,
         "worker": "deepseek-chat" if DEEPSEEK_API_KEY else None,
+        "fiat_gateway": bool(RAPIDAPI_PROXY_SECRET),
         "prices": PRICES,
     }
