@@ -8,6 +8,16 @@ Endpoints de pago (categoría "data", la de mayor demanda del ecosistema x402):
   POST /extract   $0.005  extrae JSON estructurado de texto libre (trabajador: DeepSeek)
   POST /promote   $0.02   kit publicitario x402 para el servicio del cliente (DeepSeek)
   POST /ask       $0.004  respuesta LLM de propósito general en JSON (DeepSeek)
+  POST /features  $0.003  features numéricas en vivo de un activo cripto (Binance)
+  POST /resolve   $0.008  dato objetivo de liquidación de una apuesta de precio
+                          (cierre diario UTC + fuente pública; oráculo de datos)
+  POST /edge      $0.02   probabilidad+confianza para una pregunta de apuesta:
+                          consejo de 3 analistas DeepSeek EN PARALELO + juez
+                          (patrón consejo.js), con features de mercado en vivo
+  POST /route     $0.01   x402-router: enruta al mejor servicio verificado del
+                          catálogo, PAGA el downstream en USDC y devuelve la
+                          respuesta + tx on-chain (dormido sin PAYER_PK; el
+                          catálogo gratis vive en GET /catalog)
 
 Gateway fiat (El Cambista): los mismos endpoints bajo /fiat/*, sin x402 — se
 venden por suscripción en RapidAPI; cada llamada del marketplace trae el header
@@ -27,6 +37,9 @@ Config por variables de entorno (.env soportado):
                       Bazaar x402 (sin ellas, facilitador genérico: cobra pero no lista)
   RAPIDAPI_PROXY_SECRET — secreto del panel de proveedor de RapidAPI; activa el
                       gateway fiat /fiat/* (dormido si falta)
+  PAYER_PK          — clave privada de la wallet que paga los downstream del
+                      /route; activa el router (dormido si falta). Topes:
+                      MAX_ROUTE_SPEND_ATOMIC (5000) y DAILY_SPEND_CAP_USD (0.25)
 """
 import csv
 import hmac
@@ -35,6 +48,7 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
 
@@ -47,6 +61,11 @@ from markdownify import markdownify
 import jsonschema
 
 from brain import get_brain
+from council import run_council
+from market_data import MarketDataError, VALID_INTERVALS, features_for, resolve_threshold
+from router_brain import choose as router_choose
+from router_catalog import Catalog, MAX_ROUTE_SPEND_ATOMIC, TRUST_GUARD_URL
+from router_payer import BUDGET, buy as router_buy
 
 PAY_TO = os.getenv("PAY_TO", "")
 NETWORK = os.getenv("NETWORK", "base")
@@ -64,6 +83,9 @@ PRICES = {
     "/extract": os.getenv("PRICE_EXTRACT", "$0.005"),
     "/promote": os.getenv("PRICE_PROMOTE", "$0.02"),
     "/ask": os.getenv("PRICE_ASK", "$0.004"),
+    "/features": os.getenv("PRICE_FEATURES", "$0.003"),
+    "/resolve": os.getenv("PRICE_RESOLVE", "$0.008"),
+    "/edge": os.getenv("PRICE_EDGE", "$0.02"),
 }
 
 DESCRIPTIONS = {
@@ -83,7 +105,43 @@ DESCRIPTIONS = {
     "/ask": "Ask an LLM worker anything — question answering, rewriting, "
             "summarizing, classification, brainstorming — and get a JSON "
             "answer. No account or API key needed, pay per call.",
+    "/features": "Live numeric market features for a crypto asset from "
+                 "Binance candles: RSI, SMAs, momentum, volatility, drawdown, "
+                 "range position, volume trend. Ready-made model inputs for "
+                 "trading and betting agents.",
+    "/resolve": "Settlement-grade resolution data for crypto price bets: did "
+                "ASSET close above/below X on DATE? Returns YES/NO from the "
+                "Binance UTC daily close with the public source URL. Facts, "
+                "not opinion — built for prediction-market agents.",
+    "/edge": "Betting edge for a crypto price question: a 3-analyst AI "
+             "council (YES advocate, NO advocate, quant) debates live market "
+             "features in parallel and a judge returns probability, "
+             "confidence and key reasons. Signals, not certainties.",
 }
+
+
+def _atomic(price: str) -> str:
+    from decimal import Decimal
+    return str(int(Decimal(price.lstrip("$")) * 1_000_000))
+
+
+# ------------------------------------------------------ router integrado (/route)
+# El "OpenRouter del Bazaar x402": /route recibe la necesidad del agente, elige
+# el mejor servicio verificado del catálogo, PAGA la llamada downstream en USDC
+# y devuelve la respuesta con su prueba on-chain. Peaje: cobra PRICE_ROUTE y
+# gasta ≤ MAX_ROUTE_SPEND_ATOMIC. Sin PAYER_PK duerme: ni cobra ni se lista.
+PAYER_PK = os.getenv("PAYER_PK", "")
+PRICE_ROUTE = os.getenv("PRICE_ROUTE", "$0.01")
+RESPONSE_MAX_CHARS = int(os.getenv("RESPONSE_MAX_CHARS", "20000"))
+ROUTER_ENABLED = bool(PAYER_PK)
+if ROUTER_ENABLED:
+    PRICES["/route"] = PRICE_ROUTE
+    DESCRIPTIONS["/route"] = (
+        "One call that routes your request to the best verified x402 service, "
+        "pays the downstream for you in USDC and returns its response plus "
+        "the on-chain settlement proof. Body: {'query': natural language} or "
+        "{'resource': url from GET /catalog}; optional 'payload', 'params', "
+        "'dry_run'.")
 
 app = FastAPI(
     title="agent-data-toolkit",
@@ -311,6 +369,109 @@ def ask(req: AskRequest):
     return {"ok": True, "answer": out.get("answer", out), "worker": "deepseek-chat"}
 
 
+# ----------------------------------------- betting intel (/features /resolve /edge)
+# Vende a los agentes que YA apuestan (Polymarket/sportsbooks vía x402) lo que
+# necesitan: features vivas, dato objetivo de liquidación y una probabilidad
+# razonada. Señales honestas, nunca promesas de ganancia. Los errores de
+# entrada/datos responden 4xx/503 y por tanto NO cobran (x402 liquida solo 2xx).
+BET_DISCLAIMER = ("Probabilistic signal for research; not financial advice and "
+                  "never a guarantee — any bet can lose.")
+EDGE_MAX_CHARS = int(os.getenv("EDGE_MAX_CHARS", "2000"))
+DEFAULT_HORIZON_HOURS = 72.0
+
+
+class FeaturesRequest(BaseModel):
+    symbol: str
+    interval: str = "1h"
+
+
+@app.post("/features")
+def market_features(req: FeaturesRequest):
+    try:
+        data = features_for(req.symbol, req.interval)
+    except MarketDataError as e:
+        raise HTTPException(e.status, str(e))
+    return {"ok": True, **data}
+
+
+class ResolveRequest(BaseModel):
+    question: str
+
+
+def _parse_market_question(question: str) -> dict:
+    brain = get_brain()
+    if brain is None:
+        raise HTTPException(503, "DEEPSEEK_API_KEY no configurada")
+    if not question.strip():
+        raise HTTPException(422, "question is empty")
+    if len(question) > EDGE_MAX_CHARS:
+        raise HTTPException(413, f"question exceeds {EDGE_MAX_CHARS} characters")
+    try:
+        parsed = brain.run("market_parse", question, max_tokens=300)
+    except Exception:
+        raise HTTPException(502, "el proveedor del modelo no respondió")
+    if not parsed.get("supported") or not parsed.get("symbol"):
+        raise HTTPException(422, "unsupported question — only single-crypto-asset "
+                            f"price questions for now ({parsed.get('reason', '')})")
+    return parsed
+
+
+@app.post("/resolve")
+def resolve_bet(req: ResolveRequest):
+    parsed = _parse_market_question(req.question)
+    if parsed.get("comparator") is None or parsed.get("threshold") is None \
+            or not parsed.get("date"):
+        raise HTTPException(422, "resolution needs an asset, a comparator "
+                            "(above/below), a threshold and a past UTC date, "
+                            "e.g. 'Did BTC close above $100,000 on 2026-07-01?'")
+    try:
+        result = resolve_threshold(parsed["symbol"], parsed["comparator"],
+                                   float(parsed["threshold"]), parsed["date"])
+    except MarketDataError as e:
+        raise HTTPException(e.status, str(e))
+    return {"ok": True, "question": req.question, **result}
+
+
+class EdgeRequest(BaseModel):
+    question: str
+    horizon_hours: float | None = None  # override opcional del horizonte
+
+
+@app.post("/edge")
+def betting_edge(req: EdgeRequest):
+    t0 = time.perf_counter()
+    parsed = _parse_market_question(req.question)
+    symbol = parsed["symbol"]
+
+    # Multiparámetro en paralelo: la vista micro (1h) y la macro (1d) a la vez.
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f1h, f1d = pool.map(lambda iv: features_for(symbol, iv), ("1h", "1d"))
+    except MarketDataError as e:
+        raise HTTPException(e.status, str(e))
+
+    horizon = req.horizon_hours or parsed.get("horizon_hours") or DEFAULT_HORIZON_HOURS
+    features = {"interval_1h": f1h, "interval_1d": f1d}
+    try:
+        council = run_council(get_brain(), req.question, horizon, features)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    except Exception:
+        raise HTTPException(502, "el proveedor del modelo no respondió")
+
+    return {
+        "ok": True,
+        "question": req.question,
+        "symbol": f1h["symbol"],
+        "horizon_hours": horizon,
+        **council,
+        "features": features,
+        "worker": "deepseek-council-3+judge",
+        "latency_ms": round((time.perf_counter() - t0) * 1000),
+        "disclaimer": BET_DISCLAIMER,
+    }
+
+
 # ------------------------------------------------------- gateway fiat (El Cambista)
 # Los mismos servicios vendidos por suscripción a humanos en RapidAPI: el
 # marketplace pone la tarjeta y las cuotas; aquí solo se aceptan llamadas que
@@ -327,7 +488,9 @@ def _fiat_auth(request: Request) -> None:
 fiat = APIRouter(prefix="/fiat", dependencies=[Depends(_fiat_auth)])
 for _path, _fn in [("/repair", repair), ("/validate", validate), ("/csv", to_csv),
                    ("/markdown", to_markdown), ("/extract", extract),
-                   ("/promote", promote), ("/ask", ask)]:
+                   ("/promote", promote), ("/ask", ask),
+                   ("/features", market_features), ("/resolve", resolve_bet),
+                   ("/edge", betting_edge)]:
     fiat.post(_path)(_fn)
 app.include_router(fiat)
 
@@ -414,6 +577,7 @@ def home():
         "endpoints": {p: {"price": PRICES[p], "description": DESCRIPTIONS[p]}
                       for p in PRICES},
         "free": {"GET /": "this page", "GET /ads": "full promo kit",
+                 "GET /catalog": "what POST /route can route to",
                  "GET /health": "service status", "GET /docs": "Swagger UI"},
         "payment": {"protocol": "x402", "currency": "USDC", "network": NETWORK},
         "fiat_gateway": "same endpoints under /fiat/* via RapidAPI subscription "
@@ -438,6 +602,114 @@ def ads():
     }
 
 
+# ---------------------------------------------------- router x402 (peaje /route)
+_ROUTE_SEED = [
+    {"resource": BASE_URL + p, "method": "POST",
+     "price_atomic": int(_atomic(PRICES[p])), "description": DESCRIPTIONS[p]}
+    for p in PRICES if p != "/route"
+]
+ROUTE_CATALOG = Catalog(seed=_ROUTE_SEED)
+
+
+class RouteRequest(BaseModel):
+    query: str | None = None       # necesidad en lenguaje natural, o...
+    resource: str | None = None    # ...URL exacta del catálogo
+    payload: dict | list | None = None   # body JSON para el downstream (POST)
+    params: dict | None = None     # query params para el downstream
+    method: str | None = None      # override GET/POST (default: el del catálogo)
+    dry_run: bool = False          # true = solo decide, no compra
+
+
+@app.post("/route")
+async def route(req: RouteRequest):
+    if not ROUTER_ENABLED:
+        raise HTTPException(503, "router dormido: falta PAYER_PK (wallet pagadora)")
+    await ROUTE_CATALOG.refresh()
+    if not req.query and not req.resource:
+        raise HTTPException(400, "send 'query' (natural language) or "
+                                 "'resource' (a URL from GET /catalog)")
+
+    if req.resource:
+        entry = ROUTE_CATALOG.get(req.resource)
+        if entry is None:
+            raise HTTPException(400, "resource not in the routable catalog "
+                                     "(see GET /catalog)")
+        chooser = {"resource": req.resource, "reason": "resource given by caller",
+                   "worker": "direct"}
+    else:
+        candidates = ROUTE_CATALOG.routable()
+        if not candidates:
+            raise HTTPException(503, "catalog is empty right now, retry shortly")
+        chooser = router_choose(req.query, candidates)
+        entry = ROUTE_CATALOG.get(chooser["resource"])
+
+    price = entry["price_atomic"]
+    if price > MAX_ROUTE_SPEND_ATOMIC:
+        raise HTTPException(400, f"target costs {price} atomic USDC, above the "
+                                 f"router per-call cap {MAX_ROUTE_SPEND_ATOMIC}")
+    method = (req.method or entry["method"]).upper()
+    if method not in ("GET", "POST"):
+        raise HTTPException(400, "method must be GET or POST")
+
+    if req.dry_run:
+        return {"ok": True, "dry_run": True,
+                "would_route_to": entry["resource"], "method": method,
+                "downstream_price_usd": price / 1_000_000, "chooser": chooser}
+
+    if not BUDGET.can_spend(price):
+        raise HTTPException(503, "router daily downstream budget exhausted; "
+                                 "try again tomorrow")
+
+    result = await router_buy(entry["resource"], PAYER_PK, price, method,
+                              req.payload, req.params)
+    if not result.get("performed"):
+        raise HTTPException(502, result.get("reason", "payer refused the call"))
+    if result.get("ok") or result.get("tx_hash"):
+        BUDGET.add(price)  # x402 solo liquida con 2xx; sin 2xx/tx no hubo gasto
+
+    body, parsed = result.get("body"), None
+    if body:
+        try:
+            parsed = json.loads(body)
+        except (json.JSONDecodeError, TypeError):
+            parsed = body[:RESPONSE_MAX_CHARS]
+
+    return {
+        "ok": result["ok"],
+        "routed_to": entry["resource"],
+        "chooser": chooser,
+        "downstream_status": result["status"],
+        "downstream_price_usd": result["spent_usd"],
+        "tx_hash": result["tx_hash"],
+        "explorer": (f"https://basescan.org/tx/{result['tx_hash']}"
+                     if result["tx_hash"] else None),
+        "latency_ms": result["latency_ms"],
+        "response": parsed,
+        "error": result["error"],
+    }
+
+
+@app.get("/catalog")
+async def catalog_view():
+    await ROUTE_CATALOG.refresh()
+
+    def fmt(e: dict) -> dict:
+        return {"resource": e["resource"], "method": e["method"],
+                "price_usd": e["price_atomic"] / 1_000_000,
+                "description": e["description"], "source": e["source"]}
+
+    return {
+        "ok": True,
+        "router_enabled": ROUTER_ENABLED,
+        "per_call_cap_usd": MAX_ROUTE_SPEND_ATOMIC / 1_000_000,
+        "routable": [fmt(e) for e in sorted(ROUTE_CATALOG.routable(),
+                                            key=lambda e: e["price_atomic"])],
+        "not_routable_price_above_cap": [fmt(e) for e in ROUTE_CATALOG.skipped()],
+        "sources": {"seed": "operated by us", "trust-guard":
+                    f"real-purchase verified by {TRUST_GUARD_URL}/verified"},
+    }
+
+
 # ------------------------------------------------------- discovery (/.well-known/x402)
 # Manifiesto de discovery x402 (convención well-known, RFC 8615): los crawlers
 # lo piden para indexar TODOS los recursos de pago de una vez, sin sondear
@@ -446,11 +718,6 @@ _USDC_BY_NETWORK = {
     "base": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "base-sepolia": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
 }
-
-
-def _atomic(price: str) -> str:
-    from decimal import Decimal
-    return str(int(Decimal(price.lstrip("$")) * 1_000_000))
 
 
 @app.get("/.well-known/x402")
@@ -516,5 +783,9 @@ def health():
         "network": NETWORK,
         "worker": "deepseek-chat" if DEEPSEEK_API_KEY else None,
         "fiat_gateway": bool(RAPIDAPI_PROXY_SECRET),
+        "router": {"enabled": ROUTER_ENABLED,
+                   "per_call_cap_atomic": MAX_ROUTE_SPEND_ATOMIC,
+                   "daily_spent_usd": BUDGET.spent_usd,
+                   "catalog_entries": len(ROUTE_CATALOG.entries)},
         "prices": PRICES,
     }

@@ -44,9 +44,37 @@ CASES = [
     ("/ask", "feliz (DeepSeek)", {"prompt": "¿Cuál es la capital de Colombia? Responde en una sola palabra."}, 200,
      lambda r: r["ok"] and "bogot" in json.dumps(r["answer"], ensure_ascii=False).lower()),
     ("/ask", "payload gigante", {"prompt": "x" * 20000}, 413, None),
+    ("/features", "BTC 1h (red)", {"symbol": "btc"}, 200,
+     lambda r: r["ok"] and r["symbol"] == "BTCUSDT" and r["price"] > 0
+     and 0 <= r["rsi14"] <= 100 and r["source"]),
+    ("/features", "alias bittensor 1d", {"symbol": "bittensor", "interval": "1d"}, 200,
+     lambda r: r["ok"] and r["symbol"] == "TAOUSDT" and r["interval"] == "1d"),
+    ("/features", "simbolo basura", {"symbol": "NOEXISTEXYZ"}, 422, None),
+    ("/features", "interval invalido", {"symbol": "BTC", "interval": "3m"}, 422, None),
+    ("/resolve", "resuelta conocida (DeepSeek+red)",
+     {"question": "Did Bitcoin close above $1,000 on 2026-07-01 (UTC)?"}, 200,
+     lambda r: r["ok"] and r["outcome"] == "YES" and r["observed_close"] > 1000
+     and r["symbol"] == "BTCUSDT" and r["source"] and r["rule"]),
+    ("/resolve", "fecha futura", {"question": "Did BTC close above $1 on 2099-01-01?"}, 422, None),
+    ("/resolve", "no soportada (deporte)", {"question": "Will the Lakers win tonight?"}, 422, None),
+    ("/edge", "consejo BTC (DeepSeek+red, lento)",
+     {"question": "Will Bitcoin be above $50,000 in 3 days?"}, 200,
+     lambda r: r["ok"] and 0 <= r["probability"] <= 100 and 0 <= r["confidence"] <= 100
+     and len(r["votes"]) == 3 and r["direction"] in ("YES", "NO", "TOSS_UP")
+     and r["key_reasons"] and r["disclaimer"] and r["features"]["interval_1d"]["price"] > 0),
+    ("/edge", "pregunta no cripto", {"question": "Will it rain in Bogotá tomorrow?"}, 422, None),
+    ("/edge", "pregunta vacia", {"question": "   "}, 422, None),
     ("FIAT /fiat/repair", "fiat feliz", {"broken": "{a: 1,}"}, 200,
      lambda r: r["ok"] and r["repaired"]["a"] == 1),
     ("FIATBAD /fiat/repair", "fiat secreto malo", {"broken": "{}"}, 401, None),
+    ("GET /catalog", "catalogo enrutable", None, 200,
+     lambda r: len(r["routable"]) >= 6 and r["not_routable_price_above_cap"]),
+    ("/route", "dry query json (router)", {"query": "repair my broken json string",
+     "dry_run": True}, 200,
+     lambda r: r["dry_run"] and r["would_route_to"].endswith("/repair")),
+    ("/route", "resource desconocido", {"resource": "https://example.com/x",
+     "dry_run": True}, 400, None),
+    ("/route", "sin query ni resource", {}, 400, None),
     ("GET /", "escaparate", None, 200,
      lambda r: "/promote" in r["endpoints"] and r["tagline"]),
     ("GET /ads", "kit propio", None, 200,
@@ -56,7 +84,7 @@ CASES = [
 ]
 
 results = []
-with httpx.Client(timeout=60) as c:
+with httpx.Client(timeout=120) as c:
     for path, name, payload, want_status, check in CASES:
         t0 = time.perf_counter()
         try:

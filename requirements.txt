@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 x402<2
+httpx
 cdp-sdk
 json-repair
 jsonschema

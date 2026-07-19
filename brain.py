@@ -9,6 +9,30 @@ import os
 
 from json_repair import repair_json
 
+# Reglas comunes del consejo de apuestas (patrón consejo.js del bot bittensor):
+# cada analista recibe la misma base y un ROLE distinto al final.
+_EDGE_COMMON = (
+    "You sit on a 3-analyst betting council inside a paid API. The user "
+    "message is JSON: a crypto price question, a horizon in hours, and LIVE "
+    "market features from Binance candles (1h and 1d: RSI, SMAs, momentum, "
+    "volatility, drawdown, range position, volume trend). Fields ending in "
+    "_pct are already percentages.\n"
+    "TASK: estimate the probability that the question resolves YES at/within "
+    "the horizon.\n"
+    "RULES:\n"
+    "1. Respond ONLY with JSON, keys IN THIS ORDER (reason first, then "
+    "numbers, and they must be coherent): {{\"reason\": \"2-3 sentences "
+    "citing the actual numbers\", \"probability_yes\": 0-100, "
+    "\"confidence\": 0-100}}.\n"
+    "2. Ground every claim in the features given. NEVER invent data. If the "
+    "threshold is far from the current price relative to volatility and "
+    "horizon, the probability must reflect that distance honestly.\n"
+    "3. Markets are noisy: stay within 25-75 unless the evidence is extreme "
+    "(e.g. threshold already crossed or absurdly far).\n"
+    "4. confidence = quality and agreement of the evidence, NOT boldness: "
+    "contradictory features -> low confidence.\n"
+)
+
 # Escritos de comportamiento por tarea. Reglas explícitas > improvisación.
 BEHAVIORS = {
     "extract": (
@@ -70,10 +94,74 @@ BEHAVIORS = {
         "2. Be truthful and concise; if you do not know, say so in the answer.\n"
         "3. Answer in the same language as the request unless told otherwise."
     ),
+    "market_parse": (
+        "You are a market-question parser inside a paid API for betting agents.\n"
+        "TASK: parse a prediction-market style question about a crypto asset "
+        "price into a machine-readable form.\n"
+        "RULES:\n"
+        "1. Respond ONLY with a JSON object with EXACTLY these keys:\n"
+        "   {{\"supported\": true|false, \"symbol\": \"BTC\"|...|null, "
+        "\"comparator\": \">\"|\">=\"|\"<\"|\"<=\"|null, \"threshold\": number|null, "
+        "\"date\": \"YYYY-MM-DD\"|null, \"horizon_hours\": number|null, "
+        "\"reason\": \"...\"}}.\n"
+        "2. supported=true ONLY when the question is about the PRICE of ONE "
+        "crypto asset (bitcoin, ETH, SOL...). Sports, politics, weather, "
+        "stocks, multi-asset or non-price questions -> supported=false and say "
+        "why in reason.\n"
+        "3. symbol = the asset ticker in uppercase (BTC, ETH, TAO...). Never "
+        "invent tickers for assets you do not recognize.\n"
+        "4. Resolution questions about the past ('did X close above Y on "
+        "DATE?') -> fill comparator, threshold (plain number, no commas/units) "
+        "and date (the stated calendar date, assume UTC).\n"
+        "5. Forecast questions ('will X be above Y in 3 days?') -> fill "
+        "comparator and threshold if stated, and horizon_hours (72 when the "
+        "question implies days without a number; null if no horizon implied).\n"
+        "6. 'above/over/higher than' -> '>' ; 'below/under' -> '<' ; keep >= "
+        "and <= only when explicit.\n"
+        "7. Never guess numbers that are not in the question."
+    ),
+    "edge_yes": (
+        _EDGE_COMMON
+        + "ROLE: advocate for YES. Build the strongest HONEST case that it "
+          "resolves YES; then let probability_yes be your true belief after "
+          "the exercise, not the advocacy number."
+    ),
+    "edge_no": (
+        _EDGE_COMMON
+        + "ROLE: advocate for NO. Build the strongest HONEST case that it "
+          "resolves NO; then let probability_yes be your true belief after "
+          "the exercise, not the advocacy number."
+    ),
+    "edge_quant": (
+        _EDGE_COMMON
+        + "ROLE: the quant. Ignore narratives entirely; reason ONLY from the "
+          "numbers (distance to threshold vs volatility per candle and "
+          "horizon, trend and momentum signs, RSI zone, range position)."
+    ),
+    "edge_judge": (
+        "You are the JUDGE of a 3-analyst betting council inside a paid API. "
+        "The user message is JSON: the question, horizon, live market "
+        "features, and the analysts' votes (probability_yes, confidence, "
+        "reason each).\n"
+        "TASK: synthesize the council's final answer.\n"
+        "RULES:\n"
+        "1. Respond ONLY with JSON with EXACTLY these keys: {{\"summary\": "
+        "\"2-3 sentences\", \"key_reasons\": [\"2-4 short strings\"], "
+        "\"probability\": 0-100, \"confidence\": 0-100}}.\n"
+        "2. Weigh votes by how well-grounded they are in the features, not "
+        "by rhetoric; discard any claim that contradicts the features.\n"
+        "3. probability = final probability of YES. Stay within 20-80 unless "
+        "the evidence is extreme.\n"
+        "4. If the analysts disagree by more than 30 points, confidence must "
+        "be 40 or less. confidence never exceeds the strongest evidence.\n"
+        "5. key_reasons must cite concrete numbers from the features."
+    ),
 }
 
-# /promote necesita chispa creativa, /ask algo de naturalidad; el resto, determinismo.
-TEMPERATURES = {"promote": 0.7, "ask": 0.3}
+# /promote necesita chispa creativa, /ask algo de naturalidad; los abogados del
+# consejo exploran (0.6), el quant apenas (0.2); juez y parsers, determinismo.
+TEMPERATURES = {"promote": 0.7, "ask": 0.3,
+                "edge_yes": 0.6, "edge_no": 0.6, "edge_quant": 0.2}
 
 
 class Brain:
