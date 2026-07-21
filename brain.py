@@ -163,6 +163,23 @@ BEHAVIORS = {
 TEMPERATURES = {"promote": 0.7, "ask": 0.3,
                 "edge_yes": 0.6, "edge_no": 0.6, "edge_quant": 0.2}
 
+# El alias "deepseek-chat" se depreca el 24-jul-2026 15:59 UTC; su sucesor es
+# deepseek-v4-flash (además, más barato: $0.14/M in, $0.28/M out).
+MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+# Tareas que razonan antes de responder. Verificado contra la API real
+# (21-jul-2026): thinking ES compatible con response_format json_object, cuesta
+# ~$0.00004/llamada y no aumenta la latencia de forma apreciable.
+# /promote queda fuera a propósito: es redacción creativa, y thinking anula la
+# temperatura (0.7) que le da la chispa. /repair tampoco lo necesita.
+THINKING_TASKS = {"extract", "market_parse",
+                  "edge_yes", "edge_no", "edge_quant", "edge_judge"}
+THINKING_ENABLED = os.getenv("DEEPSEEK_THINKING", "1") not in ("0", "false", "")
+# Colchón de tokens para el razonamiento, que se descuenta del mismo max_tokens
+# que la respuesta. Medido: 75-125 tokens en preguntas simples; 1200 cubre
+# análisis largos con margen.
+THINKING_TOKEN_BUDGET = int(os.getenv("DEEPSEEK_THINKING_BUDGET", "1200"))
+
 
 class Brain:
     """Envuelve a DeepSeek con el escrito de comportamiento de cada tarea."""
@@ -184,12 +201,23 @@ class Brain:
         if instructions:
             system += "\nAdditional instructions from the caller: " + instructions
         kwargs = {"max_tokens": max_tokens} if max_tokens else {}
+        # En modo thinking la temperatura no tiene efecto (la API la ignora), así
+        # que solo se envía cuando el razonamiento está apagado para esta tarea.
+        if THINKING_ENABLED and task in THINKING_TASKS:
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            # Los tokens de razonamiento se descuentan de max_tokens: sin este
+            # colchón, el modelo agota el presupuesto pensando y devuelve el JSON
+            # truncado (así se cayó el quórum de /edge al migrar a v4-flash).
+            # max_tokens es un tope, no un consumo: subirlo no encarece nada.
+            if max_tokens:
+                kwargs["max_tokens"] = max_tokens + THINKING_TOKEN_BUDGET
+        else:
+            kwargs["temperature"] = TEMPERATURES.get(task, 0)
         resp = self.client.chat.completions.create(
-            model="deepseek-chat",
+            model=MODEL,
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": content}],
             response_format={"type": "json_object"},
-            temperature=TEMPERATURES.get(task, 0),
             **kwargs,
         )
         raw = resp.choices[0].message.content or ""

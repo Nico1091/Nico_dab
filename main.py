@@ -62,6 +62,7 @@ import jsonschema
 
 from brain import get_brain
 from council import run_council
+from fiat_guard import GUARD as FIAT_GUARD
 from market_data import MarketDataError, VALID_INTERVALS, features_for, resolve_threshold
 from router_brain import choose as router_choose
 from router_catalog import Catalog, MAX_ROUTE_SPEND_ATOMIC, TRUST_GUARD_URL
@@ -70,6 +71,7 @@ from router_payer import BUDGET, buy as router_buy
 PAY_TO = os.getenv("PAY_TO", "")
 NETWORK = os.getenv("NETWORK", "base")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "200000"))
 # /ask limita más la entrada para que el coste DeepSeek nunca coma el margen.
 ASK_MAX_CHARS = int(os.getenv("ASK_MAX_CHARS", "16000"))
@@ -366,7 +368,7 @@ def ask(req: AskRequest):
         raise HTTPException(502, str(e))
     except Exception:
         raise HTTPException(502, "el proveedor del modelo no respondió")
-    return {"ok": True, "answer": out.get("answer", out), "worker": "deepseek-chat"}
+    return {"ok": True, "answer": out.get("answer", out), "worker": DEEPSEEK_MODEL}
 
 
 # ----------------------------------------- betting intel (/features /resolve /edge)
@@ -485,12 +487,23 @@ def _fiat_auth(request: Request) -> None:
         raise HTTPException(401, "la llamada no viene del gateway de RapidAPI")
 
 
-fiat = APIRouter(prefix="/fiat", dependencies=[Depends(_fiat_auth)])
+# El secreto es la única barrera de /fiat/*, así que detrás va el cortafuegos:
+# tope diario de coste del modelo + límite por minuto (ver fiat_guard.py).
+def _fiat_guard(request: Request) -> None:
+    ok, motivo = FIAT_GUARD.check(request.url.path)
+    if not ok:
+        raise HTTPException(429, motivo)
+
+
+# Catálogo fiat = el motor de datos. Los endpoints de cripto (/features,
+# /resolve, /edge) y /promote se quedan fuera a propósito: son lentos, caros en
+# DeepSeek y de nicho estrecho para un marketplace generalista. Siguen
+# vendiéndose por x402 sin cambio alguno.
+fiat = APIRouter(prefix="/fiat",
+                 dependencies=[Depends(_fiat_auth), Depends(_fiat_guard)])
 for _path, _fn in [("/repair", repair), ("/validate", validate), ("/csv", to_csv),
                    ("/markdown", to_markdown), ("/extract", extract),
-                   ("/promote", promote), ("/ask", ask),
-                   ("/features", market_features), ("/resolve", resolve_bet),
-                   ("/edge", betting_edge)]:
+                   ("/ask", ask)]:
     fiat.post(_path)(_fn)
 app.include_router(fiat)
 
@@ -781,8 +794,9 @@ def health():
         "status": "ok",
         "paid": bool(PAY_TO),
         "network": NETWORK,
-        "worker": "deepseek-chat" if DEEPSEEK_API_KEY else None,
+        "worker": DEEPSEEK_MODEL if DEEPSEEK_API_KEY else None,
         "fiat_gateway": bool(RAPIDAPI_PROXY_SECRET),
+        "fiat_guard": FIAT_GUARD.snapshot(),
         "router": {"enabled": ROUTER_ENABLED,
                    "per_call_cap_atomic": MAX_ROUTE_SPEND_ATOMIC,
                    "daily_spent_usd": BUDGET.spent_usd,

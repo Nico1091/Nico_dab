@@ -34,7 +34,7 @@ class Brain:
                    for c in candidates[:30]]
         try:
             resp = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
                 messages=[{"role": "system", "content": ROUTE_BEHAVIOR.format()},
                           {"role": "user", "content": json.dumps(
                               {"query": query, "candidates": compact})}],

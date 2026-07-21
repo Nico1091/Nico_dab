@@ -64,9 +64,28 @@ CASES = [
      and r["key_reasons"] and r["disclaimer"] and r["features"]["interval_1d"]["price"] > 0),
     ("/edge", "pregunta no cripto", {"question": "Will it rain in Bogotá tomorrow?"}, 422, None),
     ("/edge", "pregunta vacia", {"question": "   "}, 422, None),
+    # --- gateway fiat (RapidAPI): los 6 endpoints publicados ---
     ("FIAT /fiat/repair", "fiat feliz", {"broken": "{a: 1,}"}, 200,
      lambda r: r["ok"] and r["repaired"]["a"] == 1),
     ("FIATBAD /fiat/repair", "fiat secreto malo", {"broken": "{}"}, 401, None),
+    ("FIAT /fiat/validate", "fiat validate", {"data": {"a": 1},
+     "schema": {"type": "object", "properties": {"a": {"type": "integer"}}}}, 200,
+     lambda r: r["valid"] is True),
+    ("FIAT /fiat/csv", "fiat csv", {"records": [{"a": 1, "b": 2}, {"a": 3}]}, 200,
+     lambda r: r["ok"] and "a,b" in r["csv"]),
+    ("FIAT /fiat/markdown", "fiat markdown", {"html": "<h1>Hola</h1><p>Mundo</p>"}, 200,
+     lambda r: r["ok"] and "Hola" in r["markdown"]),
+    ("FIAT /fiat/extract", "fiat extract (DeepSeek)",
+     {"text": "Pedro vende 3 portatiles a 250 USD en Bogota",
+      "schema": {"type": "object", "properties": {"qty": {"type": "integer"}}}}, 200,
+     lambda r: r["ok"] and r["data"]),
+    ("FIAT /fiat/ask", "fiat ask (DeepSeek)",
+     {"prompt": "Responde con {\"pong\": true}"}, 200, lambda r: r["ok"]),
+    # --- fuera del catálogo fiat: siguen en x402, no en RapidAPI ---
+    ("FIAT /fiat/edge", "edge no expuesto en fiat", {"question": "x"}, 404, None),
+    ("FIAT /fiat/promote", "promote no expuesto en fiat", {"name": "x"}, 404, None),
+    ("FIAT /fiat/features", "features no expuesto en fiat", {"symbol": "BTC"}, 404, None),
+    ("FIAT /fiat/resolve", "resolve no expuesto en fiat", {"question": "x"}, 404, None),
     ("GET /catalog", "catalogo enrutable", None, 200,
      lambda r: len(r["routable"]) >= 6 and r["not_routable_price_above_cap"]),
     ("/route", "dry query json (router)", {"query": "repair my broken json string",
@@ -112,6 +131,30 @@ with httpx.Client(timeout=120) as c:
         except Exception as e:
             ms, ok, detail = (time.perf_counter() - t0) * 1000, False, str(e)
         results.append((path, name, ok, ms, detail))
+
+# --- rate limit del gateway fiat -------------------------------------------
+# Ráfaga sobre /fiat/csv (sin coste LLM) hasta que el guardia responda 429.
+# Se salta si el límite configurado es alto: no tiene sentido lanzar cientos de
+# peticiones en un smoke test.
+_RATE = int(os.environ.get("TEST_FIAT_RATE_PER_MIN", "120"))
+if _RATE <= 200:
+    t0 = time.perf_counter()
+    _sec = os.environ.get("TEST_FIAT_SECRET", "testsecret")
+    got429, disparos = False, 0
+    try:
+        with httpx.Client(timeout=30) as c:
+            for _ in range(_RATE + 5):
+                disparos += 1
+                r_ = c.post(BASE + "/fiat/csv", json={"records": [{"a": 1}]},
+                            headers={"X-RapidAPI-Proxy-Secret": _sec})
+                if r_.status_code == 429:
+                    got429 = True
+                    break
+        detail = "" if got429 else f"nunca dio 429 tras {disparos} peticiones"
+    except Exception as e:
+        got429, detail = False, str(e)
+    results.append(("FIAT /fiat/csv", "rate limit 429", got429,
+                    (time.perf_counter() - t0) * 1000, detail))
 
 fallos = [r for r in results if not r[2]]
 print(f"{'ENDPOINT':<12}{'CASO':<22}{'RESULTADO':<10}{'LATENCIA':>10}")
