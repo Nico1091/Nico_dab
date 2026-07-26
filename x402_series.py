@@ -182,6 +182,35 @@ def market_report() -> dict:
     }
 
 
+def dossier(max_chars: int = 24000) -> dict:
+    """El paquete que se le entrega al analista de guardia para atender una pregunta.
+
+    Lleva las cifras **y el análisis escrito por el agente nocturno**. Esa es la división
+    del trabajo: el análisis se produce de noche, sin prisa y sin coste por llamada; aquí
+    solo se atiende al comprador. Se recorta a `max_chars` para que una llamada no se
+    dispare de precio por tokens: el margen de este producto no puede depender del tamaño
+    que tenga el informe ese día.
+    """
+    d = load()
+    tramos = d.get("tramos") or []
+    vendedores = d.get("vendedores") or []
+    analisis = (d.get("analisis") or "").strip()
+    return {
+        "as_of": d.get("actualizado"),
+        "written_analysis": analisis[:max_chars] if analisis else None,
+        "analysis_author": d.get("analisis_autor"),
+        "totals": d.get("agregados"),
+        # La serie entera no cabe ni hace falta: los extremos y una muestra regular
+        # bastan para responder sobre tendencia sin inflar el prompt.
+        "series_from": tramos[0].get("desde") if tramos else None,
+        "series_to": tramos[-1].get("desde") if tramos else None,
+        "series_sample": tramos[:: max(1, len(tramos) // 12)] if tramos else [],
+        "hourly_buckets": len(tramos),
+        "top_sellers": vendedores[:25],
+        "tracked_sellers": len(vendedores),
+    }
+
+
 def freshness() -> dict:
     """Para el escaparate gratis: qué hay, de cuándo, sin entregar la serie."""
     try:

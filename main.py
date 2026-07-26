@@ -67,8 +67,8 @@ from market_data import MarketDataError, VALID_INTERVALS, features_for, resolve_
 from router_brain import choose as router_choose
 from router_catalog import Catalog, MAX_ROUTE_SPEND_ATOMIC, TRUST_GUARD_URL
 from router_payer import BUDGET, buy as router_buy
-from x402_series import SeriesError, freshness as series_freshness, \
-    market_report, market_series
+from x402_series import SeriesError, dossier as series_dossier, \
+    freshness as series_freshness, market_report, market_series
 
 PAY_TO = os.getenv("PAY_TO", "")
 NETWORK = os.getenv("NETWORK", "base")
@@ -96,6 +96,10 @@ PRICES = {
     # tarde, es un histórico que no se puede reconstruir hacia atrás.
     "/x402series": os.getenv("PRICE_X402SERIES", "$1.00"),
     "/x402report": os.getenv("PRICE_X402REPORT", "$3.00"),
+    # El unico de los tres que gasta modelo: DeepSeek atiende la pregunta con el
+    # dossier que escribio el agente nocturno. Precio intermedio: hay coste real
+    # detras (tokens), pero acotado por el recorte del dossier y max_tokens.
+    "/x402ask": os.getenv("PRICE_X402ASK", "$2.00"),
 }
 
 DESCRIPTIONS = {
@@ -138,6 +142,12 @@ DESCRIPTIONS = {
                    "actually bill over $100) and the top sellers with their "
                    "real ticket. The numbers you need before pricing an "
                    "x402 service or entering a niche.",
+    "/x402ask": "Ask anything about the x402 market and get an answer grounded "
+                "ONLY in our own research package: historical series, seller "
+                "table and a written analysis produced offline by our night "
+                "agent. Every reply carries the figures it used and a "
+                "`grounded_in_dossier` flag — when the data does not cover your "
+                "question, it says so instead of guessing.",
 }
 
 
@@ -526,6 +536,46 @@ def x402_market_report(req: ReportRequest | None = None):
         return {"ok": True, **market_report()}
     except SeriesError as e:
         raise HTTPException(e.status, e.detail)
+
+
+class X402AskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(..., min_length=3, max_length=2000,
+                          description="What you want to know about the x402 market.")
+
+
+@app.post("/x402ask")
+def x402_market_ask(req: X402AskRequest):
+    """Pregunta libre sobre el mercado x402, respondida SOLO con el dossier.
+
+    Aquí sí interviene el modelo, pero como vendedor del contenido, no como autor: el
+    análisis lo escribió el agente nocturno y este endpoint únicamente lo atiende. Por eso
+    devuelve `grounded`: si la respuesta no estaba en el dossier, el comprador se entera.
+    """
+    brain = get_brain()
+    if brain is None:
+        raise HTTPException(503, "DEEPSEEK_API_KEY no configurada")
+    try:
+        paquete = series_dossier()
+    except SeriesError as e:
+        raise HTTPException(e.status, e.detail)
+    contenido = json.dumps({"dossier": paquete, "question": req.question},
+                           ensure_ascii=False)
+    try:
+        out = brain.run("x402_analyst", contenido, max_tokens=900)
+    except Exception:
+        raise HTTPException(502, "el proveedor del modelo no respondió")
+    return {
+        "ok": True,
+        "question": req.question,
+        "answer": out.get("answer"),
+        "figures": out.get("figures", []),
+        # Honestidad explícita: si el dossier no daba para responder, se dice.
+        "grounded_in_dossier": bool(out.get("grounded")),
+        "as_of": paquete.get("as_of"),
+        "analysis_author": paquete.get("analysis_author"),
+        "worker": os.getenv("DEEPSEEK_MODEL", "deepseek"),
+    }
 
 
 @app.get("/x402series/freshness")
