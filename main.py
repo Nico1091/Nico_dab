@@ -67,11 +67,13 @@ from market_data import MarketDataError, VALID_INTERVALS, features_for, resolve_
 from router_brain import choose as router_choose
 from router_catalog import Catalog, MAX_ROUTE_SPEND_ATOMIC, TRUST_GUARD_URL
 from router_payer import BUDGET, buy as router_buy
+from x402_series import SeriesError, freshness as series_freshness, \
+    market_report, market_series
 
 PAY_TO = os.getenv("PAY_TO", "")
 NETWORK = os.getenv("NETWORK", "base")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
 MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "200000"))
 # /ask limita más la entrada para que el coste DeepSeek nunca coma el margen.
 ASK_MAX_CHARS = int(os.getenv("ASK_MAX_CHARS", "16000"))
@@ -88,6 +90,12 @@ PRICES = {
     "/features": os.getenv("PRICE_FEATURES", "$0.003"),
     "/resolve": os.getenv("PRICE_RESOLVE", "$0.008"),
     "/edge": os.getenv("PRICE_EDGE", "$0.02"),
+    # Serie histórica propia del mercado x402. Precio en la franja que este mercado SÍ paga
+    # ($0,94 apify · $1,86 stabledomains · $2,14 dTelecom · $4,31 purch), no en el suelo de
+    # $0,001 donde vive el procesamiento de texto: esto no es un cálculo replicable en una
+    # tarde, es un histórico que no se puede reconstruir hacia atrás.
+    "/x402series": os.getenv("PRICE_X402SERIES", "$1.00"),
+    "/x402report": os.getenv("PRICE_X402REPORT", "$3.00"),
 }
 
 DESCRIPTIONS = {
@@ -119,6 +127,17 @@ DESCRIPTIONS = {
              "council (YES advocate, NO advocate, quant) debates live market "
              "features in parallel and a judge returns probability, "
              "confidence and key reasons. Signals, not certainties.",
+    "/x402series": "Historical time series of the x402 market itself: hourly "
+                   "transactions, volume, buyers and active sellers — or the "
+                   "full record of one seller (volume, calls, unique buyers, "
+                   "ticket, rank). Kept beyond x402scan's rolling window, so "
+                   "it cannot be reconstructed retroactively anywhere else.",
+    "/x402report": "Full x402 market report: totals, measured trend against "
+                   "our own history (transactions, volume, buyers, sellers), "
+                   "concentration (top-1 and top-5 share, how many sellers "
+                   "actually bill over $100) and the top sellers with their "
+                   "real ticket. The numbers you need before pricing an "
+                   "x402 service or entering a niche.",
 }
 
 
@@ -472,6 +491,48 @@ def betting_edge(req: EdgeRequest):
         "latency_ms": round((time.perf_counter() - t0) * 1000),
         "disclaimer": BET_DISCLAIMER,
     }
+
+
+# ------------------------------------------- serie histórica del mercado x402
+# El único dato del catálogo que NO se puede replicar hacia atrás: x402scan publica una
+# ventana móvil de ~1 mes y lo anterior desaparece. Nosotros lo conservamos desde el
+# 26-jul-2026. No gasta LLM: es lectura de disco, así que el margen es del 100 % y no
+# depende del coste por token de ningún proveedor.
+
+class SeriesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    seller: str | None = Field(
+        None, description="Domain of one seller, e.g. 'blockrun.ai'. Omit for the "
+                          "whole-market hourly series.")
+    limit: int = Field(0, ge=0, le=5000,
+                       description="Keep only the last N hourly buckets. 0 = all.")
+
+
+@app.post("/x402series")
+def x402_market_series(req: SeriesRequest):
+    try:
+        return {"ok": True, **market_series(req.seller, req.limit)}
+    except SeriesError as e:
+        raise HTTPException(e.status, e.detail)
+
+
+class ReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+@app.post("/x402report")
+def x402_market_report(req: ReportRequest | None = None):
+    try:
+        return {"ok": True, **market_report()}
+    except SeriesError as e:
+        raise HTTPException(e.status, e.detail)
+
+
+@app.get("/x402series/freshness")
+def x402_series_freshness():
+    """Gratis a propósito: qué hay y de cuándo, sin entregar la serie. Es el gancho —
+    cobrar por decir 'tengo datos' ahuyenta al comprador antes de que pruebe nada."""
+    return series_freshness()
 
 
 # ------------------------------------------------------- gateway fiat (El Cambista)
