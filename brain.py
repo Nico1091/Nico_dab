@@ -163,9 +163,9 @@ BEHAVIORS = {
 TEMPERATURES = {"promote": 0.7, "ask": 0.3,
                 "edge_yes": 0.6, "edge_no": 0.6, "edge_quant": 0.2}
 
-# El alias "deepseek-chat" se depreca el 24-jul-2026 15:59 UTC; su sucesor es
+# El alias "deepseek-v4-pro" se depreca el 24-jul-2026 15:59 UTC; su sucesor es
 # deepseek-v4-flash (además, más barato: $0.14/M in, $0.28/M out).
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
 # Tareas que razonan antes de responder. Verificado contra la API real
 # (21-jul-2026): thinking ES compatible con response_format json_object, cuesta

@@ -1,0 +1,481 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Agent Data Toolkit",
+    "version": "1.0.0",
+    "description": "Seis endpoints de datos para pipelines de IA: repara JSON roto, valida contra JSON Schema, convierte JSON a CSV y HTML a Markdown, extrae datos estructurados de texto libre y consulta a un LLM con salida JSON estricta.\n\nSin configuración, sin GPU: JSON entra, JSON sale."
+  },
+  "servers": [
+    {
+      "url": "https://agent-data-toolkit.onrender.com/fiat"
+    }
+  ],
+  "tags": [
+    {
+      "name": "JSON",
+      "description": "Reparación y validación"
+    },
+    {
+      "name": "Conversión",
+      "description": "CSV y Markdown"
+    },
+    {
+      "name": "IA",
+      "description": "Extracción y consulta a modelo"
+    }
+  ],
+  "paths": {
+    "/repair": {
+      "post": {
+        "summary": "Repara JSON roto",
+        "operationId": "repair",
+        "description": "Arregla JSON malformado: comas colgantes, comillas simples, claves sin comillas, vallas de markdown y demás restos que dejan los LLM. Reparación mecánica primero; solo escala al modelo si hace falta. Opcionalmente valida el resultado contra tu JSON Schema.",
+        "tags": [
+          "JSON"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "broken"
+                ],
+                "properties": {
+                  "broken": {
+                    "type": "string",
+                    "description": "El texto JSON roto"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "JSON Schema opcional para validar el resultado"
+                  }
+                }
+              },
+              "example": {
+                "broken": "{name: \"Ana\", tags: [a, b,]}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON reparado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "repaired": {
+                    "name": "Ana",
+                    "tags": [
+                      "a",
+                      "b"
+                    ]
+                  },
+                  "used_model": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Llamada no autenticada por el gateway"
+          },
+          "413": {
+            "description": "Entrada demasiado grande"
+          },
+          "422": {
+            "description": "Entrada inválida (no se factura)"
+          },
+          "429": {
+            "description": "Límite de uso alcanzado; reintenta más tarde"
+          },
+          "502": {
+            "description": "El proveedor del modelo no respondió"
+          },
+          "503": {
+            "description": "Servicio no disponible"
+          }
+        }
+      }
+    },
+    "/validate": {
+      "post": {
+        "summary": "Valida contra JSON Schema",
+        "operationId": "validate",
+        "description": "Valida un documento JSON contra un JSON Schema (Draft 2020-12) y devuelve la lista precisa de violaciones, cada una con su ruta dentro del documento.",
+        "tags": [
+          "JSON"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "data",
+                  "schema"
+                ],
+                "properties": {
+                  "data": {
+                    "description": "Documento a validar"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "JSON Schema"
+                  }
+                }
+              },
+              "example": {
+                "data": {
+                  "a": 1
+                },
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "a": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado de la validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "valid": true,
+                  "violations": []
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Llamada no autenticada por el gateway"
+          },
+          "413": {
+            "description": "Entrada demasiado grande"
+          },
+          "422": {
+            "description": "Entrada inválida (no se factura)"
+          },
+          "429": {
+            "description": "Límite de uso alcanzado; reintenta más tarde"
+          },
+          "502": {
+            "description": "El proveedor del modelo no respondió"
+          },
+          "503": {
+            "description": "Servicio no disponible"
+          }
+        }
+      }
+    },
+    "/csv": {
+      "post": {
+        "summary": "Convierte registros JSON a CSV",
+        "operationId": "csv",
+        "description": "Convierte una lista de objetos JSON en CSV. La cabecera se deduce de la unión ordenada de todas las claves, así que los registros incompletos no rompen la tabla.",
+        "tags": [
+          "Conversión"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "records"
+                ],
+                "properties": {
+                  "records": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "minItems": 1
+                  },
+                  "delimiter": {
+                    "type": "string",
+                    "default": ","
+                  }
+                }
+              },
+              "example": {
+                "records": [
+                  {
+                    "a": 1,
+                    "b": 2
+                  },
+                  {
+                    "a": 3
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CSV generado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "csv": "a,b\r\n1,2\r\n3,\r\n",
+                  "rows": 2
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Llamada no autenticada por el gateway"
+          },
+          "413": {
+            "description": "Entrada demasiado grande"
+          },
+          "422": {
+            "description": "Entrada inválida (no se factura)"
+          },
+          "429": {
+            "description": "Límite de uso alcanzado; reintenta más tarde"
+          },
+          "502": {
+            "description": "El proveedor del modelo no respondió"
+          },
+          "503": {
+            "description": "Servicio no disponible"
+          }
+        }
+      }
+    },
+    "/markdown": {
+      "post": {
+        "summary": "Convierte HTML a Markdown",
+        "operationId": "markdown",
+        "description": "Convierte HTML en Markdown limpio, eliminando script, style y noscript. Pensado para preparar páginas web como contexto de un LLM (RAG).",
+        "tags": [
+          "Conversión"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "html"
+                ],
+                "properties": {
+                  "html": {
+                    "type": "string",
+                    "description": "HTML de entrada"
+                  }
+                }
+              },
+              "example": {
+                "html": "<h1>Hello</h1><p>World</p>"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Markdown generado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "markdown": "# Hello\n\nWorld"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Llamada no autenticada por el gateway"
+          },
+          "413": {
+            "description": "Entrada demasiado grande"
+          },
+          "422": {
+            "description": "Entrada inválida (no se factura)"
+          },
+          "429": {
+            "description": "Límite de uso alcanzado; reintenta más tarde"
+          },
+          "502": {
+            "description": "El proveedor del modelo no respondió"
+          },
+          "503": {
+            "description": "Servicio no disponible"
+          }
+        }
+      }
+    },
+    "/extract": {
+      "post": {
+        "summary": "Extrae datos estructurados de texto libre",
+        "operationId": "extract",
+        "description": "Convierte texto libre en JSON estructurado siguiendo el esquema que tú definas. Usa un modelo de lenguaje con razonamiento y devuelve siempre JSON estricto.",
+        "tags": [
+          "IA"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Texto del que extraer"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "Forma deseada del resultado"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "description": "Instrucciones adicionales"
+                  }
+                }
+              },
+              "example": {
+                "text": "Pedro sells 3 laptops at 250 USD in Bogota",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seller": {
+                      "type": "string"
+                    },
+                    "qty": {
+                      "type": "integer"
+                    },
+                    "city": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Datos extraídos",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "data": {
+                    "seller": "Pedro",
+                    "qty": 3,
+                    "city": "Bogota"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Llamada no autenticada por el gateway"
+          },
+          "413": {
+            "description": "Entrada demasiado grande"
+          },
+          "422": {
+            "description": "Entrada inválida (no se factura)"
+          },
+          "429": {
+            "description": "Límite de uso alcanzado; reintenta más tarde"
+          },
+          "502": {
+            "description": "El proveedor del modelo no respondió"
+          },
+          "503": {
+            "description": "Servicio no disponible"
+          }
+        }
+      }
+    },
+    "/ask": {
+      "post": {
+        "summary": "Consulta a un modelo de lenguaje con salida JSON",
+        "operationId": "ask",
+        "description": "Trabajador LLM de propósito general que responde SIEMPRE en JSON estricto, apto para encadenar en un pipeline sin post-procesado.",
+        "tags": [
+          "IA"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "description": "Tu pregunta o instrucción"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "description": "Instrucciones de formato"
+                  }
+                }
+              },
+              "example": {
+                "prompt": "Summarize in JSON: the meeting was moved to Friday 9am"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta del modelo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "answer": {
+                    "summary": "Meeting moved to Friday 9am"
+                  },
+                  "worker": "deepseek-v4-flash"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Llamada no autenticada por el gateway"
+          },
+          "413": {
+            "description": "Entrada demasiado grande"
+          },
+          "422": {
+            "description": "Entrada inválida (no se factura)"
+          },
+          "429": {
+            "description": "Límite de uso alcanzado; reintenta más tarde"
+          },
+          "502": {
+            "description": "El proveedor del modelo no respondió"
+          },
+          "503": {
+            "description": "Servicio no disponible"
+          }
+        }
+      }
+    }
+  }
+}

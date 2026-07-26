@@ -1,0 +1,481 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Agent Data Toolkit",
+    "version": "1.0.0",
+    "description": "Six data endpoints for AI pipelines: repair broken JSON, validate against JSON Schema, convert JSON to CSV and HTML to Markdown, extract structured data from free text, and query an LLM with strict JSON output.\n\nNo setup, no GPU: JSON in, JSON out."
+  },
+  "servers": [
+    {
+      "url": "https://agent-data-toolkit.onrender.com/fiat"
+    }
+  ],
+  "tags": [
+    {
+      "name": "JSON",
+      "description": "Repair and validation"
+    },
+    {
+      "name": "Conversion",
+      "description": "CSV and Markdown"
+    },
+    {
+      "name": "AI",
+      "description": "Extraction and model queries"
+    }
+  ],
+  "paths": {
+    "/repair": {
+      "post": {
+        "summary": "Repair broken JSON",
+        "operationId": "repair",
+        "description": "Fixes malformed JSON: trailing commas, single quotes, unquoted keys, markdown fences and the rest of the debris LLMs leave behind. Mechanical repair first; it only escalates to the model when needed. Optionally validates the result against your JSON Schema.",
+        "tags": [
+          "JSON"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "broken"
+                ],
+                "properties": {
+                  "broken": {
+                    "type": "string",
+                    "description": "The broken JSON text"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "Optional JSON Schema to validate the result"
+                  }
+                }
+              },
+              "example": {
+                "broken": "{name: \"Ana\", tags: [a, b,]}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repaired JSON",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "repaired": {
+                    "name": "Ana",
+                    "tags": [
+                      "a",
+                      "b"
+                    ]
+                  },
+                  "used_model": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Call not authenticated by the gateway"
+          },
+          "413": {
+            "description": "Input too large"
+          },
+          "422": {
+            "description": "Invalid input (not billed)"
+          },
+          "429": {
+            "description": "Usage limit reached; retry later"
+          },
+          "502": {
+            "description": "The model provider did not respond"
+          },
+          "503": {
+            "description": "Service unavailable"
+          }
+        }
+      }
+    },
+    "/validate": {
+      "post": {
+        "summary": "Validate against JSON Schema",
+        "operationId": "validate",
+        "description": "Validates a JSON document against a JSON Schema (Draft 2020-12) and returns the exact list of violations, each with its path inside the document.",
+        "tags": [
+          "JSON"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "data",
+                  "schema"
+                ],
+                "properties": {
+                  "data": {
+                    "description": "Document to validate"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "JSON Schema"
+                  }
+                }
+              },
+              "example": {
+                "data": {
+                  "a": 1
+                },
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "a": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result",
+            "content": {
+              "application/json": {
+                "example": {
+                  "valid": true,
+                  "violations": []
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Call not authenticated by the gateway"
+          },
+          "413": {
+            "description": "Input too large"
+          },
+          "422": {
+            "description": "Invalid input (not billed)"
+          },
+          "429": {
+            "description": "Usage limit reached; retry later"
+          },
+          "502": {
+            "description": "The model provider did not respond"
+          },
+          "503": {
+            "description": "Service unavailable"
+          }
+        }
+      }
+    },
+    "/csv": {
+      "post": {
+        "summary": "Convert JSON records to CSV",
+        "operationId": "csv",
+        "description": "Converts a list of JSON objects into CSV. The header is derived from the ordered union of all keys, so incomplete records do not break the table.",
+        "tags": [
+          "Conversion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "records"
+                ],
+                "properties": {
+                  "records": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "minItems": 1
+                  },
+                  "delimiter": {
+                    "type": "string",
+                    "default": ","
+                  }
+                }
+              },
+              "example": {
+                "records": [
+                  {
+                    "a": 1,
+                    "b": 2
+                  },
+                  {
+                    "a": 3
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated CSV",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "csv": "a,b\r\n1,2\r\n3,\r\n",
+                  "rows": 2
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Call not authenticated by the gateway"
+          },
+          "413": {
+            "description": "Input too large"
+          },
+          "422": {
+            "description": "Invalid input (not billed)"
+          },
+          "429": {
+            "description": "Usage limit reached; retry later"
+          },
+          "502": {
+            "description": "The model provider did not respond"
+          },
+          "503": {
+            "description": "Service unavailable"
+          }
+        }
+      }
+    },
+    "/markdown": {
+      "post": {
+        "summary": "Convert HTML to Markdown",
+        "operationId": "markdown",
+        "description": "Converts HTML into clean Markdown, stripping script, style and noscript. Built for turning web pages into LLM context (RAG).",
+        "tags": [
+          "Conversion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "html"
+                ],
+                "properties": {
+                  "html": {
+                    "type": "string",
+                    "description": "Input HTML"
+                  }
+                }
+              },
+              "example": {
+                "html": "<h1>Hello</h1><p>World</p>"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated Markdown",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "markdown": "# Hello\n\nWorld"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Call not authenticated by the gateway"
+          },
+          "413": {
+            "description": "Input too large"
+          },
+          "422": {
+            "description": "Invalid input (not billed)"
+          },
+          "429": {
+            "description": "Usage limit reached; retry later"
+          },
+          "502": {
+            "description": "The model provider did not respond"
+          },
+          "503": {
+            "description": "Service unavailable"
+          }
+        }
+      }
+    },
+    "/extract": {
+      "post": {
+        "summary": "Extract structured data from free text",
+        "operationId": "extract",
+        "description": "Turns free text into structured JSON following the schema you define. Uses a reasoning language model and always returns strict JSON.",
+        "tags": [
+          "AI"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Text to extract from"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "Desired shape of the result"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "description": "Additional instructions"
+                  }
+                }
+              },
+              "example": {
+                "text": "Pedro sells 3 laptops at 250 USD in Bogota",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seller": {
+                      "type": "string"
+                    },
+                    "qty": {
+                      "type": "integer"
+                    },
+                    "city": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Extracted data",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "data": {
+                    "seller": "Pedro",
+                    "qty": 3,
+                    "city": "Bogota"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Call not authenticated by the gateway"
+          },
+          "413": {
+            "description": "Input too large"
+          },
+          "422": {
+            "description": "Invalid input (not billed)"
+          },
+          "429": {
+            "description": "Usage limit reached; retry later"
+          },
+          "502": {
+            "description": "The model provider did not respond"
+          },
+          "503": {
+            "description": "Service unavailable"
+          }
+        }
+      }
+    },
+    "/ask": {
+      "post": {
+        "summary": "Query a language model with JSON output",
+        "operationId": "ask",
+        "description": "General-purpose LLM worker that ALWAYS answers in strict JSON, ready to chain in a pipeline with no post-processing.",
+        "tags": [
+          "AI"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "description": "Your question or instruction"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "description": "Formatting instructions"
+                  }
+                }
+              },
+              "example": {
+                "prompt": "Summarize in JSON: the meeting was moved to Friday 9am"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "answer": {
+                    "summary": "Meeting moved to Friday 9am"
+                  },
+                  "worker": "deepseek-v4-flash"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Call not authenticated by the gateway"
+          },
+          "413": {
+            "description": "Input too large"
+          },
+          "422": {
+            "description": "Invalid input (not billed)"
+          },
+          "429": {
+            "description": "Usage limit reached; retry later"
+          },
+          "502": {
+            "description": "The model provider did not respond"
+          },
+          "503": {
+            "description": "Service unavailable"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,105 @@
+AGENT DATA TOOLKIT — TERMS OF USE
+Last updated: 22 July 2026
+
+1. ACCEPTANCE
+By subscribing to or calling any endpoint of Agent Data Toolkit (the "API"),
+you ("Subscriber") agree to these Terms of Use. If you do not agree, do not
+use the API.
+
+2. SERVICE DESCRIPTION
+The API provides six stateless data-processing endpoints: JSON repair, JSON
+Schema validation, JSON-to-CSV conversion, HTML-to-Markdown conversion,
+structured extraction from free text, and a general-purpose LLM worker.
+Requests and responses are JSON over HTTPS.
+
+3. LICENCE
+Subject to these Terms and payment of the applicable plan, the Provider grants
+Subscriber a non-exclusive, non-transferable, revocable licence to call the API
+and to use its output for any lawful purpose, including commercial products.
+Output generated from Subscriber's own input belongs to Subscriber.
+
+4. ACCEPTABLE USE
+Subscriber shall not:
+  a) resell, sublicense or repackage the API as a substantially similar
+     competing API;
+  b) attempt to circumvent rate limits, quotas or plan boundaries, including
+     through multiple accounts;
+  c) submit content that is unlawful, infringing, malicious, or that Subscriber
+     lacks the right to process;
+  d) use the API to generate spam, malware, or content that violates applicable
+     law;
+  e) probe, scan or stress-test the infrastructure other than through normal
+     API calls.
+The Provider may suspend access immediately for breach of this section.
+
+5. RATE LIMITS AND QUOTAS
+Each plan includes a monthly request quota and a per-second rate limit as
+published on the API Hub listing. Requests exceeding these limits may be
+rejected with HTTP 429. Quotas do not roll over between billing periods.
+
+6. DATA HANDLING AND PRIVACY
+The API is stateless. Request payloads are processed in memory to produce the
+response and are not stored, logged in full, or used to train any model by the
+Provider. Operational logs retain only metadata (timestamp, endpoint, status
+code, latency, byte counts). Some endpoints forward payload content to a
+third-party large language model provider for processing; Subscriber must not
+submit personal data, credentials, health data, payment data or other sensitive
+information. Subscriber is the controller of any data it submits and is
+responsible for having a lawful basis to do so.
+
+7. AI-GENERATED OUTPUT
+Endpoints backed by a language model produce probabilistic output that may be
+incomplete or incorrect. Output is provided for informational purposes and must
+not be relied upon as professional, legal, medical or financial advice.
+Subscriber is responsible for validating output before use in production or in
+any decision affecting individuals.
+
+8. AVAILABILITY
+The Provider targets high availability but offers no uptime guarantee, service
+credits or formal SLA under these Terms. Maintenance, third-party outages and
+provider-side incidents may cause interruptions. Endpoints, request formats and
+response schemas may change; breaking changes will be announced on the API Hub
+listing where reasonably practicable.
+
+9. FEES AND BILLING
+Fees, billing cycles and quota overage charges are those published on the API
+Hub listing and are handled by the marketplace operator. All fees are
+non-refundable except where required by applicable law. Prices may change with
+notice on the listing; changes apply from the next billing period.
+
+10. SUSPENSION AND TERMINATION
+Subscriber may cancel at any time through the marketplace. The Provider may
+suspend or terminate access for breach of these Terms, non-payment, or where
+required by law. Sections 4, 7, 11, 12 and 13 survive termination.
+
+11. WARRANTY DISCLAIMER
+THE API IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTIES OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+ACCURACY, AND NON-INFRINGEMENT.
+
+12. LIMITATION OF LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE PROVIDER SHALL NOT BE LIABLE FOR
+ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES, OR FOR
+LOSS OF PROFITS, REVENUE OR DATA. THE PROVIDER'S TOTAL AGGREGATE LIABILITY
+ARISING OUT OF OR RELATING TO THE API SHALL NOT EXCEED THE AMOUNT PAID BY
+SUBSCRIBER FOR THE API IN THE THREE (3) MONTHS PRECEDING THE EVENT GIVING RISE
+TO THE CLAIM.
+
+13. INDEMNITY
+Subscriber shall indemnify and hold the Provider harmless against any claim
+arising from Subscriber's content, Subscriber's use of the API, or Subscriber's
+breach of these Terms.
+
+14. CHANGES TO THESE TERMS
+The Provider may update these Terms. Continued use of the API after an update
+constitutes acceptance of the revised Terms.
+
+15. GOVERNING LAW
+These Terms are governed by the laws of the Republic of Colombia, without
+regard to conflict-of-law rules. Any dispute shall be submitted to the
+competent courts of Colombia, without prejudice to mandatory consumer
+protections available to Subscriber under its local law.
+
+16. CONTACT
+Questions regarding these Terms may be sent through the API Hub listing's
+support channel.
