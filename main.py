@@ -60,6 +60,8 @@ from json_repair import repair_json
 from markdownify import markdownify
 import jsonschema
 
+from agentcash_discovery import build_openapi, input_body_fields, \
+    input_schema_for, output_schema_for
 from brain import get_brain
 from council import run_council
 from fiat_guard import GUARD as FIAT_GUARD
@@ -207,6 +209,11 @@ if PAY_TO:
             require_payment(path=path, price=price,
                             pay_to_address=PAY_TO, network=NETWORK,
                             description=DESCRIPTIONS[path],
+                            # Sin esquema de salida el validador de AgentCash
+                            # rechaza el recurso (SCHEMA_OUTPUT_MISSING): un
+                            # agente no compra algo cuya respuesta no conoce.
+                            input_schema=input_schema_for(path),
+                            output_schema=output_schema_for(path),
                             facilitator_config=facilitator)
         )
 
@@ -866,6 +873,14 @@ def wellknown_x402():
                     "maxTimeoutSeconds": 60,
                     "asset": _USDC_BY_NETWORK.get(NETWORK, ""),
                     "extra": {"name": "USD Coin", "version": "2"},
+                    # Misma forma que emite el middleware en el 402 real: el
+                    # crawler debe ver aquí lo mismo que verá al sondear.
+                    "outputSchema": {
+                        "input": {"type": "http", "method": "POST",
+                                  "bodyType": "json",
+                                  "bodyFields": input_body_fields(path)},
+                        "output": output_schema_for(path),
+                    },
                 }],
                 "lastUpdated": now,
                 "metadata": {"input": {"type": "http", "method": "POST",
@@ -876,6 +891,26 @@ def wellknown_x402():
         "serviceName": "agent-data-toolkit",
         "resources": resources,
     }
+
+
+# --------------------------------------------------- discovery (/openapi.json)
+# Segundo canal de descubrimiento, para AgentCash: la capa de pago x402 que
+# corre DENTRO de Claude Code, Cursor, Windsurf, Codex y Claude Desktop. Su
+# formato canónico es el propio /openapi.json, pero exige campos que FastAPI no
+# pone solo (info.x-guidance, x-payment-info y el 402 declarado por operación).
+# El well-known de arriba sirve a los crawlers del Bazaar; esto sirve al agente
+# que ya está sentado en el editor de un desarrollador.
+CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "nr039020@gmail.com")
+
+app.openapi = lambda: build_openapi(
+    app,
+    prices=PRICES,
+    descriptions=DESCRIPTIONS,
+    pay_to=PAY_TO,
+    network=NETWORK,
+    base_url=BASE_URL,
+    contact_email=CONTACT_EMAIL,
+)
 
 
 # ------------------------------------------------------------------------ self-ping
