@@ -219,6 +219,19 @@ IO_SCHEMAS: dict[str, dict] = {
                      "resumen": _ANY, "fuente": _STR, "consultado_en": _STR},
                     ["ok", "puntos", "resumen"]),
     },
+    "/inbox/send": {
+        "in": {"para": "string, the destination inbox address, e.g. agt_ab12… "
+                       "(required). Alias: 'to'",
+               "mensaje": "object or string, the message payload (required). "
+                          "Alias: 'message'",
+               "de": "string, optional sender name so the receiver knows who "
+                     "wrote. Alias: 'from'",
+               "asunto": "string, optional subject line. Alias: 'subject'"},
+        "out": _obj({**_OK, "entregado": _BOOL, "id_mensaje": _STR, "para": _STR,
+                     "enviado_en": _STR, "pendientes_en_destino": _INT,
+                     "caduca_en_horas": _INT},
+                    ["ok", "entregado", "id_mensaje"]),
+    },
     "/x402ask": {
         "in": {"question": "string, a question about the x402 market (required)"},
         "out": _obj({**_OK, "question": _STR, "answer": _STR,

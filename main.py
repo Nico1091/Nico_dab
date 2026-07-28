@@ -69,6 +69,7 @@ from market_data import MarketDataError, VALID_INTERVALS, features_for, resolve_
 from router_brain import choose as router_choose
 from router_catalog import Catalog, MAX_ROUTE_SPEND_ATOMIC, TRUST_GUARD_URL
 from router_payer import BUDGET, buy as router_buy
+import buzon_agentes
 import trm_colombia
 from x402_series import SeriesError, dossier as series_dossier, \
     freshness as series_freshness, market_report, market_series
@@ -113,6 +114,13 @@ PRICES = {
     "/trm": os.getenv("PRICE_TRM", "$0.05"),
     "/trm/convert": os.getenv("PRICE_TRM_CONVERT", "$0.05"),
     "/trm/series": os.getenv("PRICE_TRM_SERIES", "$0.25"),
+    # --- Buzon agente-a-agente ---
+    # Solo se cobra ENVIAR, y barato. Aqui el precio no es tanto el margen como
+    # la defensa: un buzon abierto y gratis se llena de basura el primer dia, y
+    # cobrar un centavo por mensaje hace que el spam masivo no salga a cuenta.
+    # Crear buzon y recoger lo tuyo son gratis, para que tenerlo sea atractivo
+    # desde el minuto uno: sin buzones no hay a quien escribir.
+    "/inbox/send": os.getenv("PRICE_INBOX_SEND", "$0.01"),
 }
 
 DESCRIPTIONS = {
@@ -175,6 +183,13 @@ DESCRIPTIONS = {
                    "two dates, with the variation already computed: absolute and "
                    "percentage change, minimum, maximum and average. For FX "
                    "analysis, backtesting and reporting on the COP/USD pair.",
+    "/inbox/send": "Agent-to-agent inbox: leave a message for another agent by "
+                   "its public address, with no account, no email and no server "
+                   "to run. Anyone can write to an address; only its owner can "
+                   "read it. Creating an inbox (POST /inbox/create) and reading "
+                   "your own messages (POST /inbox/receive) are FREE — you only "
+                   "pay to send, which is what keeps the inbox free of spam. "
+                   "Messages are ephemeral and expire in 48 hours.",
 }
 
 
@@ -992,6 +1007,55 @@ def trm_serie(req: TrmSeriesRequest):
         raise HTTPException(502, "la fuente oficial de la TRM no respondio")
 
 
+# ---------------------------------------------------------- buzon agente-a-agente
+# Dos agentes que no se conocen no tienen donde hablarse: en la cadena hay
+# direcciones, no buzones. Esto es esa pieza. Crear y leer son gratis; solo se
+# cobra enviar, y ese centavo es lo que mantiene el buzon limpio.
+class InboxSendRequest(BaseModel):
+    to: str = Field(alias="para")
+    message: object = Field(alias="mensaje")
+    sender: str | None = Field(None, alias="de")
+    subject: str | None = Field(None, alias="asunto")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class InboxReceiveRequest(BaseModel):
+    inbox: str = Field(alias="buzon")
+    key: str = Field(alias="clave")
+    keep: bool = Field(False, alias="dejar_en_buzon")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+@app.post("/inbox/create")
+def inbox_crear():
+    """GRATIS a proposito: sin buzones no hay a quien escribir, y sin nadie a
+    quien escribir el endpoint de pago no vale nada."""
+    try:
+        return {"ok": True, **buzon_agentes.crear()}
+    except buzon_agentes.BuzonError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.post("/inbox/send")
+def inbox_enviar(req: InboxSendRequest):
+    try:
+        return {"ok": True, **buzon_agentes.enviar(
+            req.to, req.message, req.sender, req.subject)}
+    except buzon_agentes.BuzonError as e:
+        # 422 => no se cobra. Un mensaje que no se entrego no se paga.
+        raise HTTPException(422, str(e))
+
+
+@app.post("/inbox/receive")
+def inbox_recoger(req: InboxReceiveRequest):
+    """GRATIS: leer lo tuyo no deberia costarte. El que paga es quien quiere
+    llegar a ti."""
+    try:
+        return {"ok": True, **buzon_agentes.recoger(req.inbox, req.key, req.keep)}
+    except buzon_agentes.BuzonError as e:
+        raise HTTPException(422, str(e))
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     """Los descubridores de agentes avisan si el origen no tiene favicon: es
@@ -1053,6 +1117,7 @@ def health():
         "worker": DEEPSEEK_MODEL if DEEPSEEK_API_KEY else None,
         "fiat_gateway": bool(RAPIDAPI_PROXY_SECRET),
         "fiat_guard": FIAT_GUARD.snapshot(),
+        "inbox": buzon_agentes.estado(),
         "router": {"enabled": ROUTER_ENABLED,
                    "per_call_cap_atomic": MAX_ROUTE_SPEND_ATOMIC,
                    "daily_spent_usd": BUDGET.spent_usd,
