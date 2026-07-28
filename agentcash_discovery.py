@@ -244,10 +244,18 @@ def input_json_schema(path: str):
 
 
 def resource_schema_for(path: str):
-    """El `schema` de la extensión bazaar: entrada y salida juntas.
+    """El `schema` de la extensión bazaar.
 
-    El validador lo sondea como `extensions.bazaar.schema.properties.input` y
-    `.output` — no es el esquema de la respuesta a secas, es el par completo.
+    No es el esquema de la respuesta ni el de la petición: es el **meta-esquema
+    del bloque `info`**. El validador lo recorre exactamente así:
+
+        schema.properties.input.properties.body      -> esquema de la petición
+        schema.properties.output.properties.example  -> esquema de la respuesta
+
+    (`queryParams` sirve de alternativa a `body` para endpoints GET.)
+    Cualquier otra anidación se lee como "falta el esquema", aunque los datos
+    estén ahí. Costó dos intentos: se ve solo sondeando el 402 real, no en el
+    documento OpenAPI.
     """
     entrada, salida = input_json_schema(path), output_schema_for(path)
     if entrada is None and salida is None:
@@ -255,8 +263,14 @@ def resource_schema_for(path: str):
     return {
         "type": "object",
         "properties": {
-            "input": entrada or {"type": "object"},
-            "output": salida or {"type": "object"},
+            "input": {
+                "type": "object",
+                "properties": {"body": entrada or {"type": "object"}},
+            },
+            "output": {
+                "type": "object",
+                "properties": {"example": salida or {"type": "object"}},
+            },
         },
     }
 
@@ -311,13 +325,11 @@ def build_openapi(app, *, prices, descriptions, pay_to, network,
 
     schema["servers"] = [{"url": base_url}]
 
-    # Prueba de propiedad del origen: el manifiesto well-known lo sirve este
-    # mismo dominio, así que quien controla el origen controla la prueba.
-    schema["x-discovery"] = {
-        "ownershipProofs": [
-            {"type": "well-known", "url": base_url + "/.well-known/x402"}
-        ]
-    }
+    # Prueba de propiedad del origen. La especificación de x402scan pide aquí
+    # una lista de DIRECCIONES ("0x..."), no objetos descriptivos: es la wallet
+    # que cobra, que es lo que ata este dominio a un titular verificable.
+    if pay_to:
+        schema["x-discovery"] = {"ownershipProofs": [pay_to]}
 
     for path, item in list(schema.get("paths", {}).items()):
         if path.startswith(_HIDDEN_PREFIXES):

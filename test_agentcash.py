@@ -121,6 +121,25 @@ if pago_v2.disponible():
               acc.get("amount") == main._atomic(main.PRICES["/repair"]),
               f"({acc.get('amount')})")
         check("red CAIP-2 en el reto", acc.get("network") == "eip155:8453")
+    # Replica EXACTA del extractor del validador oficial. Se fija aqui porque
+    # esta anidacion no se puede adivinar y solo se ve sondeando el 402 real:
+    #   schema.properties.input.properties.body
+    #   schema.properties.output.properties.example
+    print()
+    print("  -- esquemas como los lee el validador --")
+    for ruta in main.PRICES:
+        r = client.post(ruta, json={})
+        cab = r.headers.get("payment-required")
+        if not cab:
+            check(f"{ruta} emite reto", False)
+            continue
+        esq = (json.loads(base64.b64decode(cab)).get("extensions", {})
+               .get("bazaar", {}).get("schema", {}).get("properties", {}))
+        entrada = (esq.get("input", {}).get("properties", {}).get("body")
+                   or esq.get("input", {}).get("properties", {}).get("queryParams"))
+        salida = esq.get("output", {}).get("properties", {}).get("example")
+        check(f"{ruta} esquema de entrada visible", bool(entrada))
+        check(f"{ruta} esquema de salida visible", bool(salida))
 else:
     print("  (SDK v1 instalado: el camino v2 no se puede comprobar aqui)")
 
