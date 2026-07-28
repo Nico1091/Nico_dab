@@ -60,7 +60,7 @@ from json_repair import repair_json
 from markdownify import markdownify
 import jsonschema
 
-from agentcash_discovery import build_openapi, input_body_fields, \
+from agentcash_discovery import build_openapi, example_for, input_body_fields, \
     input_schema_for, output_schema_for
 from brain import get_brain
 from council import run_council
@@ -184,7 +184,22 @@ app = FastAPI(
 
 # Middleware x402: responde HTTP 402 con instrucciones de pago; el agente paga en
 # USDC y reintenta con el header X-PAYMENT. Sin PAY_TO corre gratis (solo dev).
-if PAY_TO:
+import pago_v2
+
+if PAY_TO and pago_v2.disponible():
+    # Camino v2: el único que AgentCash acepta (v1 lo rechaza con
+    # X402_VERSION_V1_NOT_SUPPORTED). Un solo middleware cubre todas las rutas.
+    app.middleware("http")(
+        pago_v2.construir_middleware(
+            prices=PRICES, descriptions=DESCRIPTIONS, pay_to=PAY_TO,
+            network=NETWORK, base_url=os.getenv(
+                "PUBLIC_URL", "https://agent-data-toolkit.onrender.com"),
+            input_body_fields=input_body_fields,
+            output_schema_for=output_schema_for,
+            example_for=example_for,
+        )
+    )
+elif PAY_TO:
     from x402.fastapi.middleware import require_payment
 
     # Con claves CDP se usa el facilitador de Coinbase (lista el servicio en el
@@ -891,6 +906,17 @@ def wellknown_x402():
         "serviceName": "agent-data-toolkit",
         "resources": resources,
     }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Los descubridores de agentes avisan si el origen no tiene favicon: es
+    parte de cómo presentan el servicio en su catálogo."""
+    from fastapi.responses import FileResponse
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.png")
+    if not os.path.exists(ruta):
+        raise HTTPException(404, "sin favicon")
+    return FileResponse(ruta, media_type="image/png")
 
 
 # --------------------------------------------------- discovery (/openapi.json)

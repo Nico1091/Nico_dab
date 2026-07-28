@@ -4,6 +4,8 @@ Contrastan el /openapi.json contra la especificación publicada por AgentCash:
 campos obligatorios, x-payment-info por operación, y la regla de conversión
 USD decimal (documento) <-> unidades atómicas (runtime del 402).
 """
+import base64
+import json
 import os
 import sys
 
@@ -93,6 +95,34 @@ print("== /openapi.json se sirve por HTTP ==")
 r = client.get("/openapi.json")
 check("200 en /openapi.json", r.status_code == 200)
 check("trae x-guidance por HTTP", bool(r.json().get("info", {}).get("x-guidance")))
+
+print()
+print("== version del protocolo (v2 es la que acepta AgentCash) ==")
+import pago_v2  # noqa: E402
+
+if pago_v2.disponible():
+    check("SDK habla v2", True)
+    check("Base mainnet en CAIP-2", pago_v2.CAIP2["base"] == "eip155:8453")
+    r = client.post("/repair", json={"broken": "{a:1,}"})
+    check("ruta de pago responde 402", r.status_code == 402,
+          f"(dio {r.status_code})")
+    cabecera = r.headers.get("payment-required")
+    check("el reto viaja en la cabecera PAYMENT-REQUIRED", bool(cabecera))
+    if cabecera:
+        reto = json.loads(base64.b64decode(cabecera))
+        check("x402Version == 2", reto.get("x402Version") == 2,
+              f"(dice {reto.get('x402Version')})")
+        check("la descripcion llega al comprador",
+              bool(reto.get("resource", {}).get("description")))
+        check("declara el bloque de descubrimiento bazaar",
+              bool(reto.get("extensions", {}).get("bazaar")))
+        acc = (reto.get("accepts") or [{}])[0]
+        check("importe en unidades atomicas coherente",
+              acc.get("amount") == main._atomic(main.PRICES["/repair"]),
+              f"({acc.get('amount')})")
+        check("red CAIP-2 en el reto", acc.get("network") == "eip155:8453")
+else:
+    print("  (SDK v1 instalado: el camino v2 no se puede comprobar aqui)")
 
 print()
 if fallos:

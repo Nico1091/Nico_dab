@@ -215,6 +215,31 @@ def input_body_fields(path: str):
     return spec["in"] if spec else None
 
 
+_EJEMPLO_POR_TIPO = {
+    "string": "", "number": 0, "integer": 0,
+    "boolean": True, "array": [], "object": {},
+}
+
+
+def example_for(path: str):
+    """Ejemplo mínimo de respuesta que SATISFACE el esquema de salida.
+
+    x402 v2 valida `example` contra `schema` al registrar la extensión bazaar,
+    así que un ejemplo inventado a mano se convierte en un aviso en el arranque
+    y en un recurso mal formado para el Bazaar. Se genera desde el propio
+    esquema —solo los campos requeridos— para que no puedan desincronizarse.
+    """
+    esquema = output_schema_for(path)
+    if not esquema:
+        return None
+    props = esquema.get("properties", {})
+    ejemplo = {}
+    for campo in esquema.get("required", []):
+        tipo = props.get(campo, {}).get("type")
+        ejemplo[campo] = True if campo == "ok" else _EJEMPLO_POR_TIPO.get(tipo, None)
+    return ejemplo
+
+
 def _decimal_usd(price: str) -> str:
     """'$0.001' -> '0.001'. AgentCash quiere USD decimal, no atómico ni con $."""
     return price.lstrip("$").strip()
@@ -254,7 +279,15 @@ def build_openapi(app, *, prices, descriptions, pay_to, network,
             continue
         price = prices.get(path)
         if not price:
-            continue  # ruta gratis: se anuncia, pero sin bloque de pago
+            # Ruta gratis: se anuncia igual, pero hay que decirlo de forma
+            # explícita. El validador infiere el modo de autenticación de
+            # `security`, y una lista vacía significa "sin protección"; si se
+            # omite, avisa con L2_AUTH_MODE_MISSING y el agente no sabe si
+            # puede llamarla sin pagar.
+            for method, operation in item.items():
+                if method in ("get", "post", "put", "patch", "delete"):
+                    operation["security"] = []
+            continue
         for method, operation in item.items():
             if method not in ("get", "post", "put", "patch", "delete"):
                 continue
