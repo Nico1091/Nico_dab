@@ -215,6 +215,52 @@ def input_body_fields(path: str):
     return spec["in"] if spec else None
 
 
+_TIPOS_TEXTO = {
+    "string": "string", "object": "object", "array": "array",
+    "integer": "integer", "number": "number", "boolean": "boolean",
+}
+
+
+def input_json_schema(path: str):
+    """JSON Schema de ENTRADA, derivado de las descripciones de IO_SCHEMAS.
+
+    Se deriva en vez de escribirse aparte para que no haya dos verdades: el
+    texto que lee el agente y el esquema que valida son la misma fuente.
+    """
+    campos = input_body_fields(path)
+    if campos is None:
+        return None
+    props, requeridos = {}, []
+    for nombre, texto in campos.items():
+        cabeza = texto.split(",")[0].strip().lower()
+        tipo = _TIPOS_TEXTO.get(cabeza.split()[0] if cabeza else "", "string")
+        props[nombre] = {"type": tipo, "description": texto}
+        if "(required)" in texto:
+            requeridos.append(nombre)
+    esquema = {"type": "object", "properties": props}
+    if requeridos:
+        esquema["required"] = requeridos
+    return esquema
+
+
+def resource_schema_for(path: str):
+    """El `schema` de la extensión bazaar: entrada y salida juntas.
+
+    El validador lo sondea como `extensions.bazaar.schema.properties.input` y
+    `.output` — no es el esquema de la respuesta a secas, es el par completo.
+    """
+    entrada, salida = input_json_schema(path), output_schema_for(path)
+    if entrada is None and salida is None:
+        return None
+    return {
+        "type": "object",
+        "properties": {
+            "input": entrada or {"type": "object"},
+            "output": salida or {"type": "object"},
+        },
+    }
+
+
 _EJEMPLO_POR_TIPO = {
     "string": "", "number": 0, "integer": 0,
     "boolean": True, "array": [], "object": {},

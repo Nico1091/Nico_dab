@@ -38,7 +38,8 @@ def disponible() -> bool:
 
 
 def _extension_descubrimiento(path: str, descripcion: str,
-                              campos_entrada, esquema_salida, ejemplo_salida):
+                              campos_entrada, esquema_salida, ejemplo_salida,
+                              esquema_recurso):
     """Bloque de discovery del Bazaar: qué recibe y qué devuelve el endpoint.
 
     Es el equivalente v2 de input_schema/output_schema. Sin él, el validador de
@@ -59,10 +60,11 @@ def _extension_descubrimiento(path: str, descripcion: str,
     salida = OutputInfo(type="json", format=None, example=ejemplo_salida)
     ext = BodyDiscoveryExtension(
         info=BodyDiscoveryInfo(input=entrada, output=salida),
-        # `schema` es obligatorio en v2: el JSON Schema del recurso. Se declara
-        # la forma de la RESPUESTA, que es lo que el agente necesita saber
-        # antes de pagar (la entrada ya va descrita en info.input).
-        schema=esquema_salida or {"type": "object"},
+        # `schema` es obligatorio en v2 y NO es el esquema de la respuesta: el
+        # validador lo sondea como `schema.properties.input` y `.output`, o
+        # sea, el par entrada+salida completo. Declarar solo la salida da
+        # SCHEMA_INPUT_MISSING contra el 402 real (en el openapi no se ve).
+        schema=esquema_recurso or {"type": "object"},
     )
     # BAZAAR es un FacilitatorExtension, no una cadena: la clave del diccionario
     # de extensiones es su .key ("bazaar").
@@ -71,7 +73,7 @@ def _extension_descubrimiento(path: str, descripcion: str,
 
 def construir_middleware(*, prices, descriptions, pay_to, network,
                          base_url, input_body_fields, output_schema_for,
-                         example_for):
+                         example_for, resource_schema_for):
     """Devuelve el middleware FastAPI de cobro v2, o None si no se puede montar.
 
     Se le pasan las mismas fuentes de verdad que usa el camino v1 (PRICES,
@@ -127,7 +129,7 @@ def construir_middleware(*, prices, descriptions, pay_to, network,
             "extensions": _extension_descubrimiento(
                 path, descriptions.get(path, ""),
                 input_body_fields(path), output_schema_for(path),
-                example_for(path),
+                example_for(path), resource_schema_for(path),
             ),
         }
 

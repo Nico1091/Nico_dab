@@ -61,7 +61,7 @@ from markdownify import markdownify
 import jsonschema
 
 from agentcash_discovery import build_openapi, example_for, input_body_fields, \
-    input_schema_for, output_schema_for
+    input_schema_for, output_schema_for, resource_schema_for
 from brain import get_brain
 from council import run_council
 from fiat_guard import GUARD as FIAT_GUARD
@@ -197,6 +197,7 @@ if PAY_TO and pago_v2.disponible():
             input_body_fields=input_body_fields,
             output_schema_for=output_schema_for,
             example_for=example_for,
+            resource_schema_for=resource_schema_for,
         )
     )
 elif PAY_TO:
