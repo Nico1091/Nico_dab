@@ -183,6 +183,42 @@ IO_SCHEMAS: dict[str, dict] = {
                                                             "items": _ANY},
                      "as_of": _STR}, ["ok"]),
     },
+    # --- TRM oficial de Colombia ---
+    # Las descripciones llevan las palabras que un agente teclearia buscando
+    # esto ("TRM", "COP", "Colombian peso", "exchange rate"): en el patron que
+    # de verdad vende, el texto ES el canal de descubrimiento.
+    "/trm": {
+        "in": {"date": "string, optional date YYYY-MM-DD; omit for today's "
+                       "official TRM (history goes back to 1991)"},
+        "out": _obj({**_OK, "trm_cop_por_usd": _NUM, "fecha": _STR,
+                     "vigencia_desde": _STR, "vigencia_hasta": _STR,
+                     "moneda_base": _STR, "moneda_destino": _STR,
+                     "fuente": _STR, "fuente_respaldo_usada": _BOOL,
+                     "consultado_en": _STR, "cacheado": _BOOL},
+                    ["ok", "trm_cop_por_usd", "fecha"]),
+    },
+    "/trm/convert": {
+        "in": {"amount": "number, amount to convert (required)",
+               "from": "string, USD, USDC or COP (defaults to USD)",
+               "date": "string, optional date YYYY-MM-DD; omit for today"},
+        "out": _obj({**_OK, "monto": _NUM, "moneda_origen": _STR,
+                     "monto_convertido": _NUM, "moneda_destino": _STR,
+                     "trm_aplicada": _NUM,
+                     "usdc_tratado_como_usd_a_la_par": _BOOL,
+                     "fecha": _STR, "vigencia_desde": _STR, "fuente": _STR,
+                     "consultado_en": _STR},
+                    ["ok", "monto_convertido", "trm_aplicada"]),
+    },
+    "/trm/series": {
+        "in": {"from": "string, start date YYYY-MM-DD (required)",
+               "to": "string, optional end date YYYY-MM-DD; defaults to today",
+               "limit": "integer, optional max points (default 400, max 2000)"},
+        "out": _obj({**_OK, "desde": _STR, "hasta": _STR,
+                     "puntos": {"type": "array", "items": _ANY},
+                     "total_puntos": _INT, "truncado": _BOOL,
+                     "resumen": _ANY, "fuente": _STR, "consultado_en": _STR},
+                    ["ok", "puntos", "resumen"]),
+    },
     "/x402ask": {
         "in": {"question": "string, a question about the x402 market (required)"},
         "out": _obj({**_OK, "question": _STR, "answer": _STR,

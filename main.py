@@ -69,6 +69,7 @@ from market_data import MarketDataError, VALID_INTERVALS, features_for, resolve_
 from router_brain import choose as router_choose
 from router_catalog import Catalog, MAX_ROUTE_SPEND_ATOMIC, TRUST_GUARD_URL
 from router_payer import BUDGET, buy as router_buy
+import trm_colombia
 from x402_series import SeriesError, dossier as series_dossier, \
     freshness as series_freshness, market_report, market_series
 
@@ -102,6 +103,16 @@ PRICES = {
     # dossier que escribio el agente nocturno. Precio intermedio: hay coste real
     # detras (tokens), pero acotado por el recorte del dossier y max_tokens.
     "/x402ask": os.getenv("PRICE_X402ASK", "$2.00"),
+    # --- TRM oficial de Colombia (primer adaptador de la fabrica) ---
+    # Precio fijado por VALOR, no por coste: el coste marginal es cero (fuente
+    # publica, sin modelo, con cache), asi que "cobrar el coste" seria cobrar
+    # $0. Se ancla en la evidencia del mercado: mediana del protocolo $0,035 y
+    # ticket medio $0,0485. $0,05 queda justo por encima de ambos y muy por
+    # debajo del umbral en que un agente se lo piensa. La serie vale mas porque
+    # entrega historico y calculo, no un dato suelto.
+    "/trm": os.getenv("PRICE_TRM", "$0.05"),
+    "/trm/convert": os.getenv("PRICE_TRM_CONVERT", "$0.05"),
+    "/trm/series": os.getenv("PRICE_TRM_SERIES", "$0.25"),
 }
 
 DESCRIPTIONS = {
@@ -150,6 +161,20 @@ DESCRIPTIONS = {
                 "agent. Every reply carries the figures it used and a "
                 "`grounded_in_dossier` flag — when the data does not cover your "
                 "question, it says so instead of guessing.",
+    "/trm": "Official Colombian exchange rate (TRM, Tasa Representativa del "
+            "Mercado) for today or any past date back to 1991, certified by the "
+            "Superintendencia Financiera de Colombia. Returns the rate, its "
+            "validity dates, the source and the query timestamp — everything an "
+            "agent needs to justify a COP figure in an audit.",
+    "/trm/convert": "Convert USD or USDC to Colombian pesos (COP) and back, at "
+                    "the official TRM for today or a given date. Built for agents "
+                    "that settle, invoice, price or account in Colombia: the "
+                    "reply carries the exact rate applied and its source, so the "
+                    "conversion is defensible, not approximate.",
+    "/trm/series": "Historical time series of the official Colombian TRM between "
+                   "two dates, with the variation already computed: absolute and "
+                   "percentage change, minimum, maximum and average. For FX "
+                   "analysis, backtesting and reporting on the COP/USD pair.",
 }
 
 
@@ -907,6 +932,64 @@ def wellknown_x402():
         "serviceName": "agent-data-toolkit",
         "resources": resources,
     }
+
+
+# ------------------------------------------------------------------- TRM Colombia
+# Primer adaptador de la fabrica: en vez de esperar a que alguien descubra un
+# servicio generico, se sirve un dato que ya se busca y que hoy NADIE sirve en
+# todo el catalogo x402 — el catalogo entero es anglosajon y no hay ninguna
+# fuente colombiana pagable por llamada.
+class TrmRequest(BaseModel):
+    date: str | None = None
+
+
+class TrmConvertRequest(BaseModel):
+    amount: float
+    from_currency: str = Field("USD", alias="from")
+    date: str | None = None
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TrmSeriesRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    from_date: str = Field(alias="from")
+    to_date: str | None = Field(None, alias="to")
+    limit: int = 400
+
+
+@app.post("/trm")
+def trm_hoy(req: TrmRequest):
+    try:
+        return {"ok": True, **trm_colombia.trm(req.date)}
+    except trm_colombia.TRMError as e:
+        # 422: dato inexistente o peticion mal formada. NO se cobra.
+        raise HTTPException(422, str(e))
+    except Exception:
+        # La fuente publica no respondio. Antes que devolver una estimacion
+        # —con la que alguien liquidaria dinero— se responde que no hay dato.
+        raise HTTPException(502, "la fuente oficial de la TRM no respondio")
+
+
+@app.post("/trm/convert")
+def trm_convertir(req: TrmConvertRequest):
+    try:
+        return {"ok": True, **trm_colombia.convertir(
+            req.amount, req.from_currency, req.date)}
+    except trm_colombia.TRMError as e:
+        raise HTTPException(422, str(e))
+    except Exception:
+        raise HTTPException(502, "la fuente oficial de la TRM no respondio")
+
+
+@app.post("/trm/series")
+def trm_serie(req: TrmSeriesRequest):
+    try:
+        return {"ok": True, **trm_colombia.serie(
+            req.from_date, req.to_date, req.limit)}
+    except trm_colombia.TRMError as e:
+        raise HTTPException(422, str(e))
+    except Exception:
+        raise HTTPException(502, "la fuente oficial de la TRM no respondio")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
